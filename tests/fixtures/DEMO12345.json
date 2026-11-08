@@ -1,0 +1,9 @@
+{
+  "synthetic": true,
+  "reference": "DEMO12345",
+  "eta": "2030-04-01T10:00:00+00:00",
+  "events": [
+    {"code": "LOAD", "occurred_at": "2030-03-10T08:00:00+00:00", "location": "DEMO PORT", "description": "Synthetic cargo loaded"},
+    {"code": "DEPART", "occurred_at": "2030-03-11T06:00:00+00:00", "location": "DEMO PORT", "description": "Synthetic vessel departed"}
+  ]
+}
