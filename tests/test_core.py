@@ -7,7 +7,7 @@ from portexa_tracking.scheduler import next_delay_hours, run_once
 
 
 def test_reference_normalization():
-    assert normalize_key("CMA CGM", " nam8787725 ", "bl") == ("CMA_CGM", "NAM8787725", "BL")
+    assert normalize_key("CMA CGM", " nam8787725 ", "bl") == ("CMA_CGM", "DEMO987654", "BL")
 
 
 def test_invalid_reference():
@@ -20,7 +20,7 @@ def test_dedup_and_claim(tmp_path):
     conn = sqlite3.connect(str(tmp_path / "test.db"))
     conn.row_factory = sqlite3.Row
     initialize(conn)
-    a = add_shipment(conn, "CMA_CGM", "NAM8787725", "BL")
+    a = add_shipment(conn, "CMA_CGM", "DEMO987654", "BL")
     b = add_shipment(conn, "CMA CGM", "nam8787725", "BL")
     assert a["id"] == b["id"]
     assert len(list_shipments(conn)) == 1
@@ -68,7 +68,7 @@ def test_pending_connector_is_transparently_unavailable(tmp_path):
     conn = sqlite3.connect(str(tmp_path / "test.db"))
     conn.row_factory = sqlite3.Row
     initialize(conn)
-    add_shipment(conn, "CMA_CGM", "NAM8787725", "BL")
+    add_shipment(conn, "CMA_CGM", "DEMO987654", "BL")
     result = run_once(conn)
     assert result["status"] == "unavailable"
     assert result["events_received"] == 0
