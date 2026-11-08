@@ -7,7 +7,7 @@ from portexa_tracking.scheduler import next_delay_hours, run_once
 
 
 def test_reference_normalization():
-    assert normalize_key("CMA CGM", " nam8787725 ", "bl") == ("CMA_CGM", "DEMO987654", "BL")
+    assert normalize_key("CMA CGM", " demo987654 ", "bl") == ("CMA_CGM", "DEMO987654", "BL")
 
 
 def test_invalid_reference():
@@ -21,7 +21,7 @@ def test_dedup_and_claim(tmp_path):
     conn.row_factory = sqlite3.Row
     initialize(conn)
     a = add_shipment(conn, "CMA_CGM", "DEMO987654", "BL")
-    b = add_shipment(conn, "CMA CGM", "nam8787725", "BL")
+    b = add_shipment(conn, "CMA CGM", "demo987654", "BL")
     assert a["id"] == b["id"]
     assert len(list_shipments(conn)) == 1
     assert claim_due(conn)["id"] == a["id"]
