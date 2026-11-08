@@ -137,18 +137,26 @@ def cycle_start(when):
     return dt.replace(hour=(dt.hour // 6) * 6).isoformat(timespec="seconds")
 
 
-def generate_tasks(conn, when=None):
-    """Idempotent, only for currently active assignments to active users."""
+def generate_tasks(conn, when=None, eligible_ids=None):
+    """Idempotent; optional verified source-ID filter for production scheduling."""
     slot = cycle_start(when or datetime.now(timezone.utc))
     with conn:
         price = int(conn.execute("SELECT value FROM ops_settings WHERE key='price_per_approved_review_iqd'").fetchone()[0])
         if price < 0:
             raise ValueError("Invalid price")
+        ids = None if eligible_ids is None else sorted({int(i) for i in eligible_ids if int(i) > 0})
+        if ids is not None and not ids:
+            return 0
         before = conn.total_changes
-        conn.execute("""INSERT OR IGNORE INTO ops_tasks(shipment_id,cycle_at,user_id,price_iqd,created_at)
+        query = """INSERT OR IGNORE INTO ops_tasks(shipment_id,cycle_at,user_id,price_iqd,created_at)
           SELECT a.shipment_id, ?, a.user_id, ?, ?
           FROM ops_assignments a JOIN ops_users u ON u.id=a.user_id
-          WHERE a.active=1 AND u.active=1""", (slot, price, now_utc()))
+          WHERE a.active=1 AND u.active=1"""
+        params = [slot, price, now_utc()]
+        if ids is not None:
+            query += " AND a.shipment_id IN (" + ",".join("?" for _ in ids) + ")"
+            params.extend(ids)
+        conn.execute(query, params)
         return conn.total_changes - before
 
 
