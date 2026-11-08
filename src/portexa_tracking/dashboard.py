@@ -6,6 +6,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit, parse_qs
 from importlib.resources import files
 from portexa_tracking.portexa_bridge import list_source_shipments, update_source_shipment
+from portexa_tracking.manual_routes import get_routes, save_route
 
 from portexa_tracking.database import add_shipment, connect, initialize, list_shipments
 from portexa_tracking.scheduler import run_once
@@ -57,7 +58,11 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/source-shipments":
             try:
                 missing = parse_qs(urlsplit(self.path).query).get("missing", ["1"])[0] == "1"
-                return self._json(200, list_source_shipments(missing_only=missing))
+                rows = list_source_shipments(missing_only=missing)
+                routes = get_routes([row['id'] for row in rows])
+                for row in rows:
+                    row['manual_route'] = routes.get(row['id'])
+                return self._json(200, rows)
             except (RuntimeError, ValueError, OSError) as exc:
                 return self._json(400, {"error": str(exc)})
         if path == "/api/shipments":
@@ -79,6 +84,15 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(413, {"error": "Invalid request size"})
             with connect() as conn:
                 initialize(conn)
+                if path.startswith("/api/manual-routes/"):
+                    try:
+                        shipment_id = int(path.rsplit("/", 1)[1])
+                        data = json.loads(self.rfile.read(size))
+                        return self._json(200, save_route(shipment_id, data["values"], data.get("expected_updated_at")))
+                    except LookupError as exc:
+                        return self._json(404, {"error": str(exc)})
+                    except RuntimeError as exc:
+                        return self._json(409, {"error": str(exc)})
                 if path.startswith("/api/source-shipments/"):
                     try:
                         shipment_id = int(path.rsplit("/", 1)[1])
