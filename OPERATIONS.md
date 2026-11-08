@@ -62,3 +62,30 @@ python -m portexa_tracking.operations_scheduler --apply
 ```
 
 The legacy `operations_cli generate` command now also filters through the read-only source bridge. No cron/systemd timer is installed by this repository change. Tests have been added, but require running in the target environment before deployment.
+
+## Automatic assignment: verified status policy (2026-11)
+
+New shipments can be automatically distributed fairly among active operators. Existing assignment ownership and task review history are retained. The admin UI has a one-click action, and the scheduler has an **opt-in** `--auto-assign` flag. Neither enables an automatic timer on its own.
+
+**Mandatory source status review before first real assignment:**
+
+```bash
+cd ~/Portexa-Tracking-Engine
+source .venv/bin/activate
+python -m portexa_tracking.operations_scheduler --statuses
+```
+
+Inspect the exact statuses. Only then configure the **active** statuses, comma separated, using actual values returned above:
+
+```bash
+export PORTEXA_OPS_ACTIVE_STATUSES="EXACT_ACTIVE_STATUS_1,EXACT_ACTIVE_STATUS_2"
+python -m portexa_tracking.operations_scheduler
+```
+
+Without `PORTEXA_OPS_ACTIVE_STATUSES`, automatic assignment **fails closed** rather than treating unknown production statuses as active. The current legacy task-generation CLI uses its earlier terminal-status logic; do not use that CLI for automatic assignment. After validating the active statuses and user assignments, opt-in run:
+
+```bash
+python -m portexa_tracking.operations_scheduler --apply --auto-assign --actor-id ADMIN_USER_ID
+```
+
+**Important:** this command creates task records with payable prices. It is **not** a preview. The current scheduler CLI dry run does not preview distribution, only already assigned tasks. Do not schedule unattended until production review and test results are verified.
