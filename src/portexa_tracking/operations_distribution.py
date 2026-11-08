@@ -2,6 +2,7 @@
 
 Only reads the source database; never rewrites existing assignments or task history.
 """
+import os
 from collections import Counter
 from portexa_tracking.portexa_bridge import source_connection, check_schema
 from portexa_tracking.operations import now_utc, audit
@@ -10,12 +11,25 @@ TERMINAL = {"delivered","completed","cancelled","canceled","archived","closed",
             "تم التسليم","مكتملة","ملغاة","مؤرشفة","مغلق"}
 
 
+def source_status_summary():
+    """Read exact production status vocabulary without modifying shipments."""
+    with source_connection() as source:
+        check_schema(source)
+        return [dict(row) for row in source.execute(
+            "SELECT COALESCE(NULLIF(TRIM(status), ''), '<EMPTY>') AS status, COUNT(*) AS count "
+            "FROM shipment GROUP BY COALESCE(NULLIF(TRIM(status), ''), '<EMPTY>') ORDER BY count DESC")]
+
+
 def source_eligible_ids():
-    """Read all source shipments (not the UI's 500-row limited page)."""
+    """Only statuses explicitly approved by the administrator are eligible."""
+    allowed = {value.strip().casefold() for value in os.environ.get(
+        "PORTEXA_OPS_ACTIVE_STATUSES", "").split(",") if value.strip()}
+    if not allowed:
+        raise ValueError("PORTEXA_OPS_ACTIVE_STATUSES must be configured after verifying source statuses")
     with source_connection() as source:
         check_schema(source)
         return [int(row["id"]) for row in source.execute("SELECT id,status FROM shipment ORDER BY id")
-                if str(row["status"] or "").strip().lower() not in TERMINAL]
+                if str(row["status"] or "").strip().casefold() in allowed]
 
 
 def distribution_preview(conn, source_ids=None):
@@ -24,7 +38,8 @@ def distribution_preview(conn, source_ids=None):
         "SELECT id,full_name,phone FROM ops_users WHERE role='operator' AND active=1 ORDER BY id")]
     assigned = {int(r["shipment_id"]):int(r["user_id"]) for r in conn.execute(
         "SELECT shipment_id,user_id FROM ops_assignments WHERE active=1")}
-    counts = Counter(uid for sid,uid in assigned.items() if sid in ids)
+    id_set = set(ids)
+    counts = Counter(uid for sid,uid in assigned.items() if sid in id_set)
     pending = [sid for sid in ids if sid not in assigned]
     plan = []
     if users:
@@ -46,10 +61,11 @@ def distribute(conn, actor, source_ids=None):
         raise ValueError("No active operators available")
     with conn:
         for sid,uid in plan["plan"]:
-            conn.execute(
+            cur = conn.execute(
                 "INSERT OR IGNORE INTO ops_assignments(shipment_id,user_id,active,assigned_at) VALUES(?,?,1,?)",
                 (sid,uid,now_utc()))
-            audit(conn,actor,"shipment.auto_assigned","shipment",sid,"user_id="+str(uid))
+            if cur.rowcount == 1:
+                audit(conn,actor,"shipment.auto_assigned","shipment",sid,"user_id="+str(uid))
         if plan["plan"]:
             audit(conn,actor,"distribution.completed","assignment",None,
                   "count="+str(len(plan["plan"])))
