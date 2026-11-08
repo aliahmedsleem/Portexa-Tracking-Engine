@@ -67,3 +67,15 @@ def test_no_pay_before_approval_and_rejected_task(db):
     op.submit_task(db, operator, task_id, "Carrier portal and screenshot", "Verified no change", False)
     op.decide_task(db, admin, task_id, True)
     assert op.payroll(db, admin, operator)["earned_iqd"] == 250
+
+
+def test_generate_only_verified_eligible_ids(db):
+    admin, operator = setup_users(db)
+    for sid in (101, 102):
+        db.execute("INSERT INTO ops_assignments(shipment_id,user_id,assigned_at) VALUES(?,?,?)",
+                   (sid,operator,op.now_utc()))
+    dt=datetime(2026,11,8,9,tzinfo=timezone.utc)
+    assert op.generate_tasks(db,dt,eligible_ids=[]) == 0
+    assert op.generate_tasks(db,dt,eligible_ids=[101]) == 1
+    assert op.generate_tasks(db,dt,eligible_ids=[101]) == 0
+    assert [r[0] for r in db.execute("SELECT shipment_id FROM ops_tasks")] == [101]
