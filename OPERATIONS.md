@@ -89,3 +89,17 @@ python -m portexa_tracking.operations_scheduler --apply --auto-assign --actor-id
 ```
 
 **Important:** this command creates task records with payable prices. It is **not** a preview. The current scheduler CLI dry run does not preview distribution, only already assigned tasks. Do not schedule unattended until production review and test results are verified.
+
+## Distribution review pages
+Authenticated admin/supervisor users now have:
+- `/source-statuses`: read-only production status counts and currently configured active status allowlist.
+- `/distribution/preview`: read-only shipment assignment preview, proposed operators and projected load per operator.
+- `/shipments/<id>/history`: assignment and review history.
+
+The admin dashboard links to these pages. **Preview is not confirmation**. Pressing the explicit confirm/distribute POST creates assignment records; this action should not be used until the status allowlist is validated.
+
+Run the expanded regression suite:
+```bash
+pytest -q tests/test_operations.py tests/test_operations_web.py tests/test_operations_distribution.py
+```
+No deployment, service changes or scheduled timer activation is performed by GitHub commits.
