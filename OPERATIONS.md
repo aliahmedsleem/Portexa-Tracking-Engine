@@ -23,7 +23,7 @@ This module is the **first backend foundation**, not a finished staff web applic
 - `tests/test_operations_web.py`: access-control and CSRF tests.
 
 ## Not implemented yet — do not claim production readiness
-- Scheduling service/systemd timer to invoke `generate_tasks` every six hours.
+- Automated systemd timer (not installed). A guarded dry-run scheduler is available in `operations_scheduler.py`; production source status values require verification.
 - Automatic fair allocation, shift planning, deadlines, late policies, active-shipment eligibility checks.
 - Detailed productivity analytics, audit browser, employee activation/deactivation and shift management UI.
 - Public deployment, email/push notifications and end-to-end acceptance tests.
@@ -50,3 +50,15 @@ export PORTEXA_OPS_SECRET_KEY="$(python -c 'import secrets;print(secrets.token_h
 portexa-operations-ui
 ```
 The secret must be persisted securely across restarts before real use. Access only through an SSH tunnel to loopback port 8766. **Do not port-forward this service publicly**. No scheduler is installed automatically; the operator task generation is currently a manual command. Do not create payable tasks before validating eligible shipments and assigning staff.
+
+## Guarded scheduler (no timer installed)
+The scheduler reads assigned source shipment IDs using the existing read-only PORTEXA bridge and excludes missing or known terminal shipments. Unrecognized status values are **not** automatically treated as terminal: review the production status vocabulary before enabling any automatic execution.
+
+```bash
+# Preview only; does not create tasks
+python -m portexa_tracking.operations_scheduler
+# After testing and verifying statuses, run once manually:
+python -m portexa_tracking.operations_scheduler --apply
+```
+
+The legacy `operations_cli generate` command now also filters through the read-only source bridge. No cron/systemd timer is installed by this repository change. Tests have been added, but require running in the target environment before deployment.
