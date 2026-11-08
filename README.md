@@ -11,7 +11,7 @@ Independent multi-carrier tracking service for PORTEXA, designed around verifiab
 - Does not scrape carrier websites until automation is expressly permitted by their terms.
 
 ## First test reference
-CMA CGM: `NAM8787725` (unverified; no live data claimed).
+No customer shipment references are committed to this public repository.
 
 ## Getting started
 Requires Python 3.11+.
@@ -21,7 +21,7 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 portexa-tracking init
-portexa-tracking add --carrier CMA_CGM --reference NAM8787725 --type BL
+portexa-tracking add --carrier CMA_CGM --reference DEMO987654 --type BL
 portexa-tracking list
 portexa-tracking run-once
 pytest
@@ -30,6 +30,7 @@ pytest
 The built-in carrier adapters default to `unavailable` until configured with an authorized connector. To test the entire pipeline locally:
 
 ```bash
+PORTEXA_FIXTURE_DIR=tests/fixtures portexa-tracking add --carrier FIXTURE --reference DEMO12345 --type BL
 PORTEXA_FIXTURE_DIR=tests/fixtures portexa-tracking run-once --carrier FIXTURE
 ```
 
