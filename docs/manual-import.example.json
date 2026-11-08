@@ -1,0 +1,18 @@
+{
+  "carrier": "CMA_CGM",
+  "reference": "DEMO987654",
+  "reference_type": "BL",
+  "source": "operator_verified",
+  "confirmed": true,
+  "checked_at": "2030-03-12T10:00:00+03:00",
+  "eta": "2030-04-01T10:00:00+03:00",
+  "events": [
+    {
+      "code": "LOAD",
+      "occurred_at": "2030-03-11T08:00:00+03:00",
+      "location": "EXAMPLE PORT",
+      "description": "Example only; not a real shipment",
+      "container": ""
+    }
+  ]
+}
