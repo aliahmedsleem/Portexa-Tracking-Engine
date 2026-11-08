@@ -2,8 +2,9 @@
 import os
 from .base import PendingAuthorizationAdapter
 from .fixture import FixtureAdapter
+from .browser_demo import BrowserDemoAdapter
 
-CARRIERS = ("CMA_CGM", "MSC", "MAERSK", "HAPAG_LLOYD", "COSCO", "FIXTURE")
+CARRIERS = ("CMA_CGM", "MSC", "MAERSK", "HAPAG_LLOYD", "COSCO", "FIXTURE", "BROWSER_DEMO")
 ALIASES = {
     "CMA CGM": "CMA_CGM", "CMACGM": "CMA_CGM",
     "HAPAG-LLOYD": "HAPAG_LLOYD", "HAPAG LLOYD": "HAPAG_LLOYD",
@@ -20,6 +21,8 @@ def normalize_carrier(value: str) -> str:
 
 def get_adapter(carrier: str):
     carrier = normalize_carrier(carrier)
+    if carrier == "BROWSER_DEMO":
+        return BrowserDemoAdapter()
     if carrier == "FIXTURE":
         directory = os.environ.get("PORTEXA_FIXTURE_DIR")
         if not directory:
