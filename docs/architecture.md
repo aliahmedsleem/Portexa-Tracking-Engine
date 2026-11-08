@@ -17,7 +17,7 @@ Atomic SQLite leases prevent two workers from claiming the same due job simultan
 Each carrier adapter must use a permitted integration and map source-specific milestones to `TrackingEvent`. Do not infer real location from routing schedules or AIS without explicit source labeling and customer consent.
 
 ## Integration roadmap
-1. Verify allowed data access for CMA CGM and test `NAM8787725` under authorization.
+1. Verify allowed data access for CMA CGM and test a consented real reference privately under authorization.
 2. Record raw-to-normalized event fixture from a lawful response (redact sensitive details).
 3. Add provider rate-limit handling, observability, owner authorization and API auth.
 4. Connect PORTEXA's shipment registry and notifications through an authenticated bridge.
