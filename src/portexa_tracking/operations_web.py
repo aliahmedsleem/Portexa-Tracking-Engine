@@ -9,6 +9,7 @@ from flask import Flask, abort, flash, redirect, render_template_string, request
 from markupsafe import escape
 from portexa_tracking.database import connect
 from portexa_tracking import operations as ops
+from portexa_tracking import operations_distribution as dist
 
 app = Flask(__name__)
 app.config.update(
@@ -21,18 +22,29 @@ app.config.update(
 )
 CSS = """
 <style>
-:root{font-family:system-ui,Tahoma,sans-serif;color-scheme:dark;background:#0a192b;color:#e7edf6}
-*{box-sizing:border-box}body{margin:0}header{background:#11283f;padding:16px 4%;border-bottom:1px solid #345}
-main{max-width:1200px;margin:auto;padding:20px 14px}h1{color:#e7bf76;font-size:24px}
-nav{display:flex;gap:12px;flex-wrap:wrap}a{color:#e7bf76}
-.panel{background:#142b42;border:1px solid #34536b;border-radius:14px;padding:18px;margin:14px 0}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,230px),1fr));gap:12px}
-label{display:block;margin:10px 0}input,select,textarea,button{font:inherit;padding:10px;border-radius:8px;max-width:100%;width:100%}
-input,select,textarea{background:#071a2b;color:white;border:1px solid #48627a}
-button{background:#e7bf76;color:#12243a;border:0;font-weight:bold;cursor:pointer}
-table{border-collapse:collapse;width:100%;min-width:580px}td,th{padding:10px;border-bottom:1px solid #38506a;text-align:right}
-.scroll{overflow-x:auto}.error{color:#ffc6a9}.muted{color:#aabaca}
-@media(max-width:600px){main{padding:12px}.panel{padding:12px}h1{font-size:20px}}
+:root{font-family:system-ui,Tahoma,Arial,sans-serif;color-scheme:dark;background:#081827;color:#eaf1f8}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(circle at 85% 0%,#193750 0%,#081827 42%)}
+header{background:#10283fdf;padding:18px clamp(16px,4vw,56px);border-bottom:1px solid #31485d;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+header h1{font-size:clamp(19px,2vw,25px);margin:0;color:#efc77c;letter-spacing:.2px}
+main{max-width:1260px;margin:0 auto;padding:clamp(16px,3vw,34px)}
+h2{font-size:20px;color:#f2d39b;margin:0 0 18px}h3{font-size:16px;margin:0 0 10px}
+nav{display:flex;align-items:center;gap:14px;flex-wrap:wrap}a{color:#efc77c;text-decoration:none}a:hover{text-decoration:underline}
+.panel{background:#142a40;border:1px solid #2f4c65;border-radius:16px;padding:clamp(16px,2vw,24px);margin:0 0 18px;box-shadow:0 10px 32px #0002}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,245px),1fr));gap:16px}
+label{display:block;margin:0 0 16px;font-size:14px;color:#c8d7e6}
+input,select,textarea{display:block;width:100%;min-height:44px;margin-top:7px;padding:11px 13px;border-radius:9px;border:1px solid #49657e;background:#091c2e;color:#fff;font:inherit}
+input:focus,select:focus,textarea:focus{outline:2px solid #d9b16d;outline-offset:1px}
+button{width:auto;min-height:42px;padding:10px 20px;background:#e7bf76;color:#10243b;border:0;border-radius:9px;font:inherit;font-weight:700;cursor:pointer}
+button:hover{background:#f8d89a}form{max-width:100%}
+.scroll{overflow-x:auto;border:1px solid #29465d;border-radius:10px}
+table{width:100%;border-collapse:collapse;min-width:620px}td,th{text-align:right;padding:13px;border-bottom:1px solid #29465d;font-size:14px}th{color:#e8c688;background:#1c3951}
+.muted{color:#aabaca}.error{color:#ffc6a9}strong{font-size:19px}
+body:has(form[action$="/login"]) main{min-height:calc(100vh - 95px);display:grid;place-items:center}
+body:has(form[action$="/login"]) main>.panel{width:min(100%,420px);padding:clamp(24px,4vw,38px)}
+body:has(form[action$="/login"]) main>.panel form button{width:100%;margin-top:6px}
+body:has(form[action$="/login"]) main>.panel h2{text-align:center;margin-bottom:24px}
+nav form{margin:0}nav button{min-height:34px;padding:6px 14px}
+@media(max-width:600px){header{padding:15px}main{padding:14px}.panel{margin-bottom:12px}.grid{gap:10px}table{min-width:550px}}
 </style>
 """
 BASE = """<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>PORTEXA Operations</title>""" + CSS + """</head><body>
@@ -138,6 +150,7 @@ def home():
 {% else %}<section class="panel">لا توجد مهام حالياً</section>{% endfor %}""", tasks=tasks)
         stats = ops.dashboard_stats(conn, u["id"])
         users = [dict(r) for r in conn.execute("SELECT id,full_name,phone,username,role,active FROM ops_users ORDER BY id")]
+        assignments = dist.assignment_history(conn)
         pending = [dict(r) for r in conn.execute("SELECT t.id,t.shipment_id,t.user_id,t.review_note,t.evidence_source,t.route_changed FROM ops_tasks t WHERE t.status='submitted' ORDER BY t.id LIMIT 100")]
         return page("""<div class="grid">
 <section class="panel"><h3>المستخدمون</h3><strong>{{ stats.users }}</strong></section>
@@ -151,9 +164,15 @@ def home():
 <label>الاسم الكامل<input name="name" required></label><label>رقم الهاتف<input name="phone" required></label>
 <label>اسم المستخدم<input name="username" required></label><label>كلمة المرور<input type="password" name="password" minlength="12" required></label>
 <label>الصلاحية<select name="role"><option value="operator">موظف</option><option value="supervisor">مشرف</option></select></label></div><button>إضافة</button></form></section>{% endif %}
-<section class="panel"><h2>إسناد بوليصة</h2><form method="post" action="{{ url_for('assign_task') }}"><input type="hidden" name="csrf" value="{{ csrf }}">
-<div class="grid"><label>رقم الشحنة في PORTEXA<input name="shipment_id" type="number" min="1" required></label>
-<label>الموظف<select name="user_id">{% for x in users if x.role=='operator' and x.active %}<option value="{{ x.id }}">{{ x.full_name }}</option>{% endfor %}</select></label></div><button>إسناد</button></form></section>
+<section class="panel"><h2>التوزيع التلقائي العادل</h2>
+<p class="muted">تُسند البوالص الجديدة تلقائياً إلى الموظفين الأقل حملاً، وتبقى الإسنادات السابقة محفوظة.</p>
+<form method="post" action="{{ url_for('auto_distribute') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button>توزيع البوالص الجديدة تلقائياً</button></form></section>
+<section class="panel"><h2>البوالص المسندة وسجل العمل</h2><div class="scroll">
+<table><tr><th>البوليصة / الشحنة</th><th>الموظف المسؤول</th><th>عدد المراجعات</th><th>المعتمدة</th><th>آخر إرسال</th><th>التفاصيل</th></tr>
+{% for a in assignments %}<tr><td>#{{ a.shipment_id }}</td><td>{{ a.operator_name }}</td>
+<td>{{ a.reviews }}</td><td>{{ a.approved_reviews }}</td><td>{{ a.last_submitted_at or '—' }}</td>
+<td><a href="{{ url_for('shipment_history',shipment_id=a.shipment_id) }}">سجل المراجعات</a></td></tr>
+{% else %}<tr><td colspan="6">لم تُوزع بوالص بعد</td></tr>{% endfor %}</table></div></section>
 <section class="panel"><h2>تحديثات تنتظر الاعتماد</h2>
 {% for t in pending %}<div class="panel"><strong>شحنة #{{ t.shipment_id }}</strong>
 <p>المصدر: {{ t.evidence_source }} · {{ t.review_note }}</p><p>تغيير بيانات: {{ 'نعم' if t.route_changed else 'لا' }}</p>
@@ -164,7 +183,7 @@ def home():
 {% if user.role=='admin' %}<section class="panel"><h2>سعر المراجعة المعتمدة</h2><form method="post" action="{{ url_for('price') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><label>د.ع لكل مراجعة<input type="number" min="0" max="10000000" name="amount" required></label><button>حفظ السعر للدورات القادمة</button></form></section>{% endif %}
 <section class="panel"><h2>إرسال إشعار</h2><form method="post" action="{{ url_for('send_notice') }}"><input type="hidden" name="csrf" value="{{ csrf }}">
 <label>المستخدم<select name="user_id">{% for x in users if x.active %}<option value="{{ x.id }}">{{ x.full_name }}</option>{% endfor %}</select></label>
-<label>العنوان<input name="title" required></label><label>الرسالة<textarea name="body" required></textarea></label><button>إرسال</button></form></section>""", stats=stats, users=users, pending=pending)
+<label>العنوان<input name="title" required></label><label>الرسالة<textarea name="body" required></textarea></label><button>إرسال</button></form></section>""", stats=stats, users=users, pending=pending, assignments=assignments)
 
 
 def action(callback):
@@ -181,6 +200,29 @@ def action(callback):
 @require("admin")
 def add_user():
     return action(lambda c,a: ops.create_user(c,a,request.form["name"],request.form["phone"],request.form["username"],request.form["password"],request.form.get("role","operator")))
+
+
+@app.post("/auto-distribute")
+@require("admin","supervisor")
+def auto_distribute():
+    return action(lambda c,a: dist.distribute(c,a))
+
+
+@app.get("/shipments/<int:shipment_id>/history")
+@require("admin","supervisor")
+def shipment_history(shipment_id):
+    with db() as conn:
+        rows=dist.review_history(conn,shipment_id)
+        owner=conn.execute("SELECT u.full_name FROM ops_assignments a JOIN ops_users u ON u.id=a.user_id WHERE a.shipment_id=?",(shipment_id,)).fetchone()
+    if not owner: abort(404)
+    return page("""<section class="panel"><h2>سجل مراجعات الشحنة #{{ shipment_id }}</h2>
+<p>المسؤول الحالي: {{ owner }}</p><div class="scroll"><table>
+<tr><th>الدورة</th><th>الموظف المنفذ</th><th>الحالة</th><th>الملاحظات</th><th>المصدر</th><th>المعتمد بواسطة</th></tr>
+{% for r in rows %}<tr><td>{{ r.cycle_at }}</td><td>{{ r.operator_name }}</td>
+<td>{{ r.status }}</td><td>{{ r.review_note or '—' }}</td><td>{{ r.evidence_source or '—' }}</td>
+<td>{{ r.approver_name or '—' }}</td></tr>
+{% else %}<tr><td colspan="6">لا توجد مراجعات بعد</td></tr>{% endfor %}</table></div></section>""",
+shipment_id=shipment_id,owner=owner["full_name"],rows=rows)
 
 
 @app.post("/assign")
