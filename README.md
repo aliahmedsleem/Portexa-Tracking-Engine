@@ -57,3 +57,27 @@ CLI / future authenticated API
 
 ## Status
 Foundation ready; carrier integrations are **not** connected to live data. Next milestone: obtain permission or an approved data-access method for one carrier and validate a real response against the official tracker.
+
+## Local operator dashboard (phase 2)
+
+Run the dashboard on the Ubuntu server:
+
+```bash
+cd ~/Portexa-Tracking-Engine
+source .venv/bin/activate
+git pull --ff-only origin main
+pip install -e ".[dev]"
+portexa-tracking-ui
+```
+
+The UI listens on `127.0.0.1:8765` **only**. On a Windows computer with SSH access to the server, open a separate terminal:
+
+```powershell
+ssh -L 8765:127.0.0.1:8765 alialameeri@SERVER_LAN_IP
+```
+
+Then open `http://127.0.0.1:8765` in your Windows browser. Keep the SSH connection open.
+
+**Do not forward port 8765 in your router, expose it via Nginx or run this local operator dashboard on a public interface.** This is a development console without user authentication, protected by its loopback-only binding and your SSH tunnel. The production-facing UI will require role-based authentication, HTTPS and CSRF protection.
+
+The dashboard can add references, show normalized events and run one due check at a time. Production carriers will show `unavailable` until a permitted live integration is installed. To try synthetic data, launch the UI with `PORTEXA_FIXTURE_DIR=tests/fixtures portexa-tracking-ui`, then add carrier `FIXTURE` with reference `DEMO12345`.
