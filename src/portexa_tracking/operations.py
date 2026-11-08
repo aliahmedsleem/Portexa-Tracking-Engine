@@ -130,8 +130,10 @@ def assign(conn, actor, shipment_id, user_id):
 
 
 def cycle_start(when):
-    """UTC slot boundaries, corresponding to 03/09/15/21 Baghdad time."""
-    dt = when.astimezone(timezone.utc).replace(minute=0, second=0, microsecond=0)
+    """Six-hour slots at 00/06/12/18 Asia/Baghdad (UTC+03)."""
+    from datetime import timedelta
+    baghdad = timezone(timedelta(hours=3))
+    dt = when.astimezone(baghdad).replace(minute=0, second=0, microsecond=0)
     return dt.replace(hour=(dt.hour // 6) * 6).isoformat(timespec="seconds")
 
 
