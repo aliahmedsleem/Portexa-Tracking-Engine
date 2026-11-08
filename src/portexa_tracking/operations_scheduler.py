@@ -7,7 +7,7 @@ import argparse
 from datetime import datetime, timezone
 from portexa_tracking.database import connect
 from portexa_tracking.operations import init_operations, generate_tasks, cycle_start
-from portexa_tracking.portexa_bridge import source_connection, check_schema
+from portexa_tracking.operations_distribution import source_eligible_ids, source_status_summary, distribute
 
 # Exact known terminal statuses; site-specific status values must be reviewed before enabling.
 TERMINAL = {"delivered", "completed", "cancelled", "canceled", "archived", "closed",
@@ -15,24 +15,13 @@ TERMINAL = {"delivered", "completed", "cancelled", "canceled", "archived", "clos
 
 
 def eligible_assignments(conn):
-    """Fail closed if PORTEXA source cannot be read or its schema differs."""
+    """Only explicitly allowed source statuses; fail closed on missing configuration."""
+    active_source = set(source_eligible_ids())
     assigned = [int(row[0]) for row in conn.execute(
         """SELECT a.shipment_id FROM ops_assignments a
            JOIN ops_users u ON u.id=a.user_id
            WHERE a.active=1 AND u.active=1 AND u.role='operator'""")]
-    if not assigned:
-        return [], []
-    with source_connection() as src:
-        check_schema(src)
-        # SQLite's bind limit varies by version; use small batches.
-        rows = []
-        for start in range(0, len(assigned), 400):
-            chunk = assigned[start:start+400]
-            q = ",".join("?" for _ in chunk)
-            rows.extend(src.execute("SELECT id,status FROM shipment WHERE id IN ("+q+")", chunk).fetchall())
-    active = [int(r["id"]) for r in rows if str(r["status"] or "").strip().lower() not in TERMINAL]
-    inactive = sorted(set(assigned) - set(active))
-    return active, inactive
+    return sorted(set(assigned) & active_source), sorted(set(assigned) - active_source)
 
 
 def preview(conn, when=None):
@@ -54,9 +43,21 @@ def preview(conn, when=None):
 def main():
     p=argparse.ArgumentParser(description="PORTEXA operations six-hour cycle")
     p.add_argument("--apply", action="store_true", help="create tasks (default is dry-run)")
+    p.add_argument("--auto-assign", action="store_true", help="assign eligible new shipments before creating tasks")
+    p.add_argument("--actor-id", type=int, help="authorized admin or supervisor ID required with --auto-assign")
+    p.add_argument("--statuses", action="store_true", help="print source status counts; no changes")
     args=p.parse_args()
+    if args.statuses:
+        for row in source_status_summary():
+            print(repr(row["status"]), row["count"])
+        return
+    if args.auto_assign and (not args.apply or not args.actor_id):
+        p.error("--auto-assign requires --apply and --actor-id")
     with connect() as conn:
         init_operations(conn)
+        if args.auto_assign:
+            plan = distribute(conn,args.actor_id)
+            print("Auto-assigned:",len(plan["plan"]))
         info=preview(conn)
         print("Cycle:",info["cycle_at"])
         print("Eligible:",info["eligible"],"Skipped:",info["skipped"],"New:",info["new"])
