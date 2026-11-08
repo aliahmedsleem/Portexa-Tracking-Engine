@@ -14,6 +14,7 @@ dev = ["pytest>=8.0"]
 
 [project.scripts]
 portexa-tracking = "portexa_tracking.cli:main"
+portexa-tracking-ui = "portexa_tracking.dashboard:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
