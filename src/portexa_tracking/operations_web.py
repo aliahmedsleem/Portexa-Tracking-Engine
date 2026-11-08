@@ -10,6 +10,7 @@ from markupsafe import escape
 from portexa_tracking.database import connect
 from portexa_tracking import operations as ops
 from portexa_tracking import operations_distribution as dist
+from portexa_tracking.operations_scheduler import preview as cycle_preview
 
 app = Flask(__name__)
 app.config.update(
@@ -166,6 +167,7 @@ def home():
 <label>الصلاحية<select name="role"><option value="operator">موظف</option><option value="supervisor">مشرف</option></select></label></div><button>إضافة</button></form></section>{% endif %}
 <section class="panel"><h2>التوزيع التلقائي العادل</h2>
 <p class="muted">تُسند البوالص الجديدة تلقائياً إلى الموظفين الأقل حملاً، وتبقى الإسنادات السابقة محفوظة.</p>
+<p><a href="{{ url_for('distribution_preview_page') }}">معاينة توزيع البوالص والأحمال قبل التنفيذ</a></p>
 <form method="post" action="{{ url_for('auto_distribute') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button>توزيع البوالص الجديدة تلقائياً</button></form></section>
 <section class="panel"><h2>البوالص المسندة وسجل العمل</h2><div class="scroll">
 <table><tr><th>البوليصة / الشحنة</th><th>الموظف المسؤول</th><th>عدد المراجعات</th><th>المعتمدة</th><th>آخر إرسال</th><th>التفاصيل</th></tr>
@@ -200,6 +202,35 @@ def action(callback):
 @require("admin")
 def add_user():
     return action(lambda c,a: ops.create_user(c,a,request.form["name"],request.form["phone"],request.form["username"],request.form["password"],request.form.get("role","operator")))
+
+
+@app.get("/distribution/preview")
+@require("admin","supervisor")
+def distribution_preview_page():
+    try:
+        with db() as conn:
+            plan = dist.distribution_preview(conn)
+            cycle = cycle_preview(conn)
+        return page("""<section class="panel"><h2>معاينة التوزيع العادل</h2>
+<p>البوالص المؤهلة: <strong>{{ p.eligible }}</strong> · المسندة مسبقاً: <strong>{{ p.already_assigned }}</strong>
+· الجديدة: <strong>{{ p.unassigned }}</strong></p>
+<p>مهام الدورة الحالية المتوقعة من الإسنادات الحالية: <strong>{{ cycle.new }}</strong></p>
+<p class="muted">المعاينة لا تحفظ أي إسناد ولا تنشئ مهام أو أجوراً.</p></section>
+<section class="panel"><h2>الحمل المتوقع لكل موظف</h2><div class="scroll"><table>
+<tr><th>الموظف</th><th>الهاتف</th><th>عدد البوالص بعد التوزيع</th></tr>
+{% for u in p.users %}<tr><td>{{ u.full_name }}</td><td>{{ u.phone }}</td><td>{{ u.load }}</td></tr>
+{% else %}<tr><td colspan="3">لا يوجد موظفون نشطون</td></tr>{% endfor %}</table></div></section>
+<section class="panel"><h2>البوالص الجديدة المقترحة</h2><div class="scroll"><table>
+<tr><th>رقم الشحنة</th><th>الموظف المقترح</th></tr>
+{% for shipment_id,user_id in p.plan %}<tr><td>#{{ shipment_id }}</td>
+<td>{{ names.get(user_id,'—') }}</td></tr>
+{% else %}<tr><td colspan="2">لا توجد بوالص جديدة للتوزيع</td></tr>{% endfor %}</table></div>
+<form method="post" action="{{ url_for('auto_distribute') }}"><input type="hidden" name="csrf" value="{{ csrf }}">
+<button>تأكيد التوزيع</button></form></section>""",
+p=plan,cycle=cycle,names={u["id"]:u["full_name"] for u in plan["users"]})
+    except (ValueError,RuntimeError,OSError) as exc:
+        return page("""<section class="panel"><h2>تعذر عرض المعاينة</h2>
+<p>{{ error }}</p><p>راجع إعداد الحالات النشطة وقاعدة بيانات المصدر.</p></section>""",error=str(exc)),503
 
 
 @app.post("/auto-distribute")
