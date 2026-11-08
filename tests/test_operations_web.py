@@ -45,3 +45,21 @@ def test_admin_dashboard(client):
     assert client.post("/login", data={"username":"admin","password":"strong-password-admin","csrf":token(client)}).status_code == 302
     assert client.get("/").status_code == 200
     assert client.post("/price",data={"csrf":token(client),"amount":"300"}).status_code == 302
+
+
+def test_distribution_preview_role_guard(client, monkeypatch):
+    client.get("/login")
+    client.post("/login", data={"username":"operator","password":"strong-password-operator","csrf":token(client)})
+    assert client.get("/distribution/preview").status_code == 403
+    client.post("/logout",data={"csrf":token(client)})
+    client.get("/login")
+    client.post("/login",data={"username":"admin","password":"strong-password-admin","csrf":token(client)})
+    monkeypatch.setattr(web.dist,"distribution_preview",lambda conn:{
+        "eligible":2,"already_assigned":0,"unassigned":2,
+        "plan":[(100,2),(101,2)],
+        "users":[{"id":2,"full_name":"Operator","phone":"0771","load":2}]
+    })
+    monkeypatch.setattr(web,"cycle_preview",lambda conn:{"new":0})
+    result=client.get("/distribution/preview")
+    assert result.status_code==200
+    assert "100".encode() in result.data
