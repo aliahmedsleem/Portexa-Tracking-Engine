@@ -3,7 +3,9 @@ import json
 import os
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, parse_qs
+from importlib.resources import files
+from portexa_tracking.portexa_bridge import list_source_shipments, update_source_shipment
 
 from portexa_tracking.database import add_shipment, connect, initialize, list_shipments
 from portexa_tracking.scheduler import run_once
@@ -49,6 +51,15 @@ class Handler(BaseHTTPRequestHandler):
         path = urlsplit(self.path).path
         if path == "/":
             return self._send(200, HTML, "text/html; charset=utf-8")
+        if path == "/source":
+            page = files("portexa_tracking").joinpath("source_page.html").read_text(encoding="utf-8")
+            return self._send(200, page, "text/html; charset=utf-8")
+        if path == "/api/source-shipments":
+            try:
+                missing = parse_qs(urlsplit(self.path).query).get("missing", ["1"])[0] == "1"
+                return self._json(200, list_source_shipments(missing_only=missing))
+            except (RuntimeError, ValueError, OSError) as exc:
+                return self._json(400, {"error": str(exc)})
         if path == "/api/shipments":
             with connect() as conn:
                 initialize(conn)
@@ -68,6 +79,18 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(413, {"error": "Invalid request size"})
             with connect() as conn:
                 initialize(conn)
+                if path.startswith("/api/source-shipments/"):
+                    try:
+                        shipment_id = int(path.rsplit("/", 1)[1])
+                        data = json.loads(self.rfile.read(size))
+                        updated = update_source_shipment(shipment_id, data["values"], data["expected"])
+                        return self._json(200, updated)
+                    except PermissionError as exc:
+                        return self._json(403, {"error": str(exc)})
+                    except LookupError as exc:
+                        return self._json(404, {"error": str(exc)})
+                    except RuntimeError as exc:
+                        return self._json(409, {"error": str(exc)})
                 if path == "/api/shipments":
                     data = json.loads(self.rfile.read(size))
                     row = add_shipment(conn, data["carrier"], data["reference"], data["type"])
