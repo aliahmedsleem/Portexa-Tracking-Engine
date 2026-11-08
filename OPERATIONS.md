@@ -17,11 +17,15 @@ This module is the **first backend foundation**, not a finished staff web applic
 `src/portexa_tracking/operations.py`: schema, password hashing, user roles, assignments, task generation, submission, approval, payroll, notifications, audit.
 `tests/test_operations.py`: core regression coverage.
 
+## Additional implemented development components
+- `src/portexa_tracking/operations_web.py`: separate loopback-only Flask web UI on port 8766 with login, role guards, CSRF, user management, assignment, task submission, supervisor approvals, notifications, pricing and payroll.
+- `src/portexa_tracking/operations_cli.py`: initial admin bootstrap and manual idempotent task generation.
+- `tests/test_operations_web.py`: access-control and CSRF tests.
+
 ## Not implemented yet — do not claim production readiness
-- Authenticated web login, sessions, CSRF and role-specific operator/admin pages.
 - Scheduling service/systemd timer to invoke `generate_tasks` every six hours.
 - Automatic fair allocation, shift planning, deadlines, late policies, active-shipment eligibility checks.
-- Supervisor review screen, dashboard, notifications inbox, finance/payment UI.
+- Detailed productivity analytics, audit browser, employee activation/deactivation and shift management UI.
 - Public deployment, email/push notifications and end-to-end acceptance tests.
 
 ## Developer check
@@ -34,3 +38,15 @@ pytest -q tests/test_operations.py
 ```
 
 **Do not initialize or run operations against production until the authenticated web interface and safe deployment procedure are complete.**
+
+## Local development preview (NOT production deployment)
+```bash
+cd ~/Portexa-Tracking-Engine
+source .venv/bin/activate
+pip install -e '.[dev]'
+pytest -q tests/test_operations.py tests/test_operations_web.py
+python -m portexa_tracking.operations_cli bootstrap-admin
+export PORTEXA_OPS_SECRET_KEY="$(python -c 'import secrets;print(secrets.token_hex(32))')"
+portexa-operations-ui
+```
+The secret must be persisted securely across restarts before real use. Access only through an SSH tunnel to loopback port 8766. **Do not port-forward this service publicly**. No scheduler is installed automatically; the operator task generation is currently a manual command. Do not create payable tasks before validating eligible shipments and assigning staff.
