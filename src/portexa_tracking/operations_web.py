@@ -167,7 +167,7 @@ def home():
 <label>الصلاحية<select name="role"><option value="operator">موظف</option><option value="supervisor">مشرف</option></select></label></div><button>إضافة</button></form></section>{% endif %}
 <section class="panel"><h2>التوزيع التلقائي العادل</h2>
 <p class="muted">تُسند البوالص الجديدة تلقائياً إلى الموظفين الأقل حملاً، وتبقى الإسنادات السابقة محفوظة.</p>
-<p><a href="{{ url_for('distribution_preview_page') }}">معاينة توزيع البوالص والأحمال قبل التنفيذ</a></p>
+<p><a href="{{ url_for('distribution_preview_page') }}">معاينة توزيع البوالص والأحمال قبل التنفيذ</a> · <a href="{{ url_for('source_statuses_page') }}">فحص حالات الشحنات الأصلية</a></p>
 <form method="post" action="{{ url_for('auto_distribute') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button>توزيع البوالص الجديدة تلقائياً</button></form></section>
 <section class="panel"><h2>البوالص المسندة وسجل العمل</h2><div class="scroll">
 <table><tr><th>البوليصة / الشحنة</th><th>الموظف المسؤول</th><th>عدد المراجعات</th><th>المعتمدة</th><th>آخر إرسال</th><th>التفاصيل</th></tr>
@@ -202,6 +202,21 @@ def action(callback):
 @require("admin")
 def add_user():
     return action(lambda c,a: ops.create_user(c,a,request.form["name"],request.form["phone"],request.form["username"],request.form["password"],request.form.get("role","operator")))
+
+
+@app.get("/source-statuses")
+@require("admin","supervisor")
+def source_statuses_page():
+    try:
+        rows = dist.source_status_summary()
+        configured = [x.strip() for x in os.environ.get("PORTEXA_OPS_ACTIVE_STATUSES","").split(",") if x.strip()]
+        return page("""<section class="panel"><h2>حالات الشحنات في PORTEXA</h2>
+<p class="muted">قراءة فقط من قاعدة المصدر. الحالات المسموحة حالياً: {{ configured|join('، ') if configured else 'لم تُضبط بعد' }}</p>
+<div class="scroll"><table><tr><th>الحالة الأصلية</th><th>عدد الشحنات</th></tr>
+{% for r in rows %}<tr><td>{{ r.status }}</td><td>{{ r.count }}</td></tr>
+{% else %}<tr><td colspan="2">لا توجد شحنات</td></tr>{% endfor %}</table></div></section>""",rows=rows,configured=configured)
+    except (ValueError,RuntimeError,OSError) as exc:
+        return page("""<section class="panel"><h2>تعذر قراءة حالات المصدر</h2><p>{{ error }}</p></section>""",error=str(exc)),503
 
 
 @app.get("/distribution/preview")
