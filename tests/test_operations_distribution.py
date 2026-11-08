@@ -44,3 +44,12 @@ def test_no_active_operators_does_not_assign():
         assert c.execute("SELECT COUNT(*) FROM ops_assignments").fetchone()[0]==0
     finally:
         c.close()
+
+
+def test_unconfigured_source_statuses_fail_closed(monkeypatch):
+    monkeypatch.delenv("PORTEXA_OPS_ACTIVE_STATUSES", raising=False)
+    try:
+        dist.source_eligible_ids()
+        assert False, "Unconfigured source status filter must reject distribution"
+    except ValueError as exc:
+        assert "PORTEXA_OPS_ACTIVE_STATUSES" in str(exc)
