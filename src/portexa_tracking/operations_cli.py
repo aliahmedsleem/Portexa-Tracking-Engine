@@ -8,7 +8,8 @@ Usage:
 import argparse
 import getpass
 from portexa_tracking.database import connect
-from portexa_tracking.operations import create_user, generate_tasks, init_operations
+from portexa_tracking.operations import create_user, init_operations
+from portexa_tracking.operations_scheduler import eligible_assignments
 
 
 def main():
@@ -27,7 +28,9 @@ def main():
             create_user(conn, None, name, phone, username, password, "admin")
             print("Initial admin created.")
         elif args.command == "generate":
-            print("New tasks:", generate_tasks(conn))
+            from portexa_tracking.operations import generate_tasks
+            active, skipped = eligible_assignments(conn)
+            print("New tasks:", generate_tasks(conn, eligible_ids=active), "Skipped:", len(skipped))
         else:
             for row in conn.execute("SELECT status,COUNT(*) n FROM ops_tasks GROUP BY status"):
                 print(row["status"], row["n"])
