@@ -280,7 +280,7 @@ def home():
 <label>تاريخ الشحن<input type="date" name="ship_date" value="{{ t.shipment.ship_date or '' }}"></label>
 <label>تاريخ الوصول<input type="date" name="arrival_date" value="{{ t.shipment.arrival_date or '' }}"></label></div>
 <label>تفاصيل الشحن<textarea name="shipping_details" maxlength="2000">{{ t.shipment.shipping_details or '' }}</textarea></label>
-<h3>الحاويات وحركة النقل</h3><div class="container-list">
+<h3>الحاويات وحركة النقل</h3><p class="muted">تُحفظ حركة كل حاوية بصورة مستقلة. لا تستخدم نسخ الحركة إلا إذا تحركت جميع الحاويات معاً.</p><div class="container-list">
 {% for c in t.containers %}<fieldset class="container-item"><legend>حاوية {{ loop.index }}</legend>
 <div class="grid"><label>رقم الحاوية<input name="container_number" value="{{ c.container_number }}" required maxlength="30"></label>
 {% for key,label in movement_labels %}<label>{{ label }}<input name="move_{{ key }}" value="{{ c[key] or '' }}" maxlength="{{ 1500 if key=='operator_notes' else 200 }}"></label>{% endfor %}
