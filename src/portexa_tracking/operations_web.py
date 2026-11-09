@@ -9,7 +9,7 @@ from functools import wraps
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 from portexa_tracking import operations_shipment_edit as edit
 from portexa_tracking import manual_routes as routes
-from portexa_tracking.portexa_bridge import get_source_shipment, read_container_movements, save_shipment_bundle, MOVEMENT_FIELDS
+from portexa_tracking.portexa_bridge import get_source_shipment, read_container_movements, read_container_history, save_shipment_bundle, MOVEMENT_FIELDS
 from flask import Flask, abort, flash, redirect, render_template_string, request, session, url_for
 from markupsafe import escape
 from portexa_tracking.database import connect
@@ -233,6 +233,7 @@ def home():
                     task["can_edit"] = False
                     task["route"] = routes.get_routes([task["shipment_id"]]).get(task["shipment_id"]) if task["shipment"] else None
                     task["containers"] = read_container_movements(task["shipment_id"]) if task["shipment"] else []
+                    task["movement_history"] = read_container_history(task["shipment_id"], limit=30) if task["shipment"] else []
                     if task["shipment"] and task["status"] in ("pending", "rejected"):
                         edit.authorized_task(conn, u["id"], task["id"])
                         task["can_edit"] = True
@@ -291,6 +292,19 @@ def home():
 </div><button type="button" class="remove-container">حذف الحاوية</button></fieldset></template>
 <div class="bundle-actions"><button type="button" class="add-container">+ إضافة حاوية</button><button type="button" class="copy-movement">تحديث جماعي: نسخ حركة الأولى للبقية</button></div>
 <button type="submit" class="bundle-save">حفظ جميع التحديثات في PORTEXA</button></form>
+<details class="panel"><summary>سجل تغييرات الحاويات (آخر 30 حدثاً)</summary>
+{% if t.movement_history %}
+<div class="table-wrap"><table><thead><tr><th>الوقت (UTC)</th><th>الحاوية</th><th>الإجراء</th><th>رقم الموظف</th><th>التغييرات</th></tr></thead><tbody>
+{% for event in t.movement_history %}
+<tr><td>{{ event.recorded_at }}</td><td>{{ event.container_number }}</td>
+<td>{{ {'created':'إضافة','updated':'تعديل','removed':'حذف'}.get(event.action,event.action) }}</td>
+<td>{{ event.actor_id if event.actor_id is not none else '—' }}</td>
+<td><details><summary>عرض التفاصيل</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">{{ event.previous_state or '—' }}
+→
+{{ event.new_state or '—' }}</pre></details></td></tr>
+{% endfor %}</tbody></table></div>
+{% else %}<p class="muted">لا يوجد تاريخ مسجل بعد؛ يبدأ التسجيل مع عمليات الحفظ الجديدة.</p>{% endif %}
+</details>
 {% else %}
 <div class="grid">
 <div>البوليصة: {{ t.shipment.bol_no or '—' }}</div>
