@@ -1,6 +1,6 @@
 """Authenticated staff operations UI, isolated from the legacy local dashboard.
 
-Run only on loopback behind SSH tunnel. Uses Flask sessions, CSRF, and role checks.
+Run on loopback behind a trusted HTTPS reverse proxy. Uses Flask sessions, CSRF, and role checks.
 """
 import os
 import secrets
@@ -27,39 +27,103 @@ app.config.update(
 )
 CSS = """
 <style>
-:root{font-family:system-ui,Tahoma,Arial,sans-serif;color-scheme:dark;background:#081827;color:#eaf1f8}
-*{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(circle at 85% 0%,#193750 0%,#081827 42%)}
-header{background:#10283fdf;padding:18px clamp(16px,4vw,56px);border-bottom:1px solid #31485d;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
-header h1{font-size:clamp(19px,2vw,25px);margin:0;color:#efc77c;letter-spacing:.2px}
-main{max-width:1260px;margin:0 auto;padding:clamp(16px,3vw,34px)}
+:root{font-family:system-ui,Tahoma,Arial,sans-serif;color-scheme:dark;background:#091522;color:#e9f0f7;--bg:#091522;--panel:#14273a;--line:#2c4359;--gold:#e8bf78;--muted:#aebed0}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:radial-gradient(circle at 85% 0%,#17334a 0%,var(--bg) 55%);line-height:1.65}
+a{color:var(--gold);text-decoration:none}a:hover{text-decoration:underline}
+.app-shell{min-height:100vh;display:grid;grid-template-columns:260px minmax(0,1fr)}
+.sidebar{position:sticky;top:0;height:100vh;overflow-y:auto;background:#0e2032;border-left:1px solid var(--line);padding:26px 16px;display:flex;flex-direction:column;gap:26px}
+.brand{display:flex;align-items:center;gap:12px;padding:4px 9px 22px;border-bottom:1px solid var(--line)}
+.brand-mark{display:grid;place-items:center;width:44px;height:44px;flex-shrink:0;border:1px solid #a7844c;border-radius:13px;background:#2c302e;color:#f5d59a;font-weight:900;font-size:24px}
+.brand strong{display:block;color:#f5d59a;font-size:18px;line-height:1.3;letter-spacing:.6px}
+.brand small{display:block;color:var(--muted);font-size:11px}
+.side-label{font-size:11px;color:#91a9bc;padding:0 13px;margin-bottom:8px;letter-spacing:.4px}
+.side-nav{display:flex;flex-direction:column;gap:6px}
+.side-nav a{display:flex;align-items:center;gap:10px;padding:11px 14px;border-radius:10px;color:#d3e0eb;font-size:14px;font-weight:600}
+.side-nav a:hover,.side-nav a.active{background:#243b50;color:#f5d59a;text-decoration:none}
+.side-nav .nav-symbol{width:24px;text-align:center;font-size:18px}
+.sidebar-footer{margin-top:auto;border-top:1px solid var(--line);padding:16px 8px 0}
+.profile-name{font-weight:700;overflow-wrap:anywhere}
+.profile-role{font-size:12px;color:var(--muted);margin:3px 0 12px}
+.sidebar-footer form{margin:0}
+.sidebar-footer button{width:100%;background:#253a4d;color:#f3d9ab;border:1px solid #456078}
+.workspace{min-width:0}
+.topbar{min-height:78px;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:16px clamp(18px,3vw,40px);border-bottom:1px solid var(--line);background:#102235aa}
+.topbar h1{margin:0;font-size:clamp(17px,2vw,23px);color:#f3d19a}
+.topbar p{margin:3px 0 0;color:var(--muted);font-size:12px}
+.workspace-tag{font-size:12px;color:#b8c9d8;border:1px solid #36536b;border-radius:999px;padding:5px 12px;white-space:nowrap}
+main{max-width:1500px;margin:0 auto;padding:clamp(16px,2.5vw,36px);min-width:0}
 h2{font-size:20px;color:#f2d39b;margin:0 0 18px}h3{font-size:16px;margin:0 0 10px}
-nav{display:flex;align-items:center;gap:14px;flex-wrap:wrap}a{color:#efc77c;text-decoration:none}a:hover{text-decoration:underline}
-.panel{background:#142a40;border:1px solid #2f4c65;border-radius:16px;padding:clamp(16px,2vw,24px);margin:0 0 18px;box-shadow:0 10px 32px #0002}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,245px),1fr));gap:16px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:clamp(16px,2vw,24px);margin:0 0 18px;box-shadow:0 10px 28px #0002;min-width:0}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:16px}
 label{display:block;margin:0 0 16px;font-size:14px;color:#c8d7e6}
 input,select,textarea{display:block;width:100%;min-height:44px;margin-top:7px;padding:11px 13px;border-radius:9px;border:1px solid #49657e;background:#091c2e;color:#fff;font:inherit}
-input:focus,select:focus,textarea:focus{outline:2px solid #d9b16d;outline-offset:1px}
-button{width:auto;min-height:42px;padding:10px 20px;background:#e7bf76;color:#10243b;border:0;border-radius:9px;font:inherit;font-weight:700;cursor:pointer}
-button:hover{background:#f8d89a}form{max-width:100%}
-.scroll{overflow-x:auto;border:1px solid #29465d;border-radius:10px}
-table{width:100%;border-collapse:collapse;min-width:620px}td,th{text-align:right;padding:13px;border-bottom:1px solid #29465d;font-size:14px}th{color:#e8c688;background:#1c3951}
-.muted{color:#aabaca}.error{color:#ffc6a9}strong{font-size:19px}
-body:has(form[action$="/login"]) main{min-height:calc(100vh - 95px);display:grid;place-items:center}
-body:has(form[action$="/login"]) main>.panel{width:min(100%,420px);padding:clamp(24px,4vw,38px)}
-body:has(form[action$="/login"]) main>.panel form button{width:100%;margin-top:6px}
-body:has(form[action$="/login"]) main>.panel h2{text-align:center;margin-bottom:24px}
-nav form{margin:0}nav button{min-height:34px;padding:6px 14px}
-@media(max-width:600px){header{padding:15px}main{padding:14px}.panel{margin-bottom:12px}.grid{gap:10px}table{min-width:550px}}
+textarea{min-height:95px;resize:vertical}
+input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-visible,a:focus-visible{outline:2px solid #f2cc85;outline-offset:2px}
+button{width:auto;min-height:42px;padding:10px 20px;background:var(--gold);color:#10243b;border:0;border-radius:9px;font:inherit;font-weight:700;cursor:pointer}
+button:hover{filter:brightness(1.09)}
+form{max-width:100%}
+.scroll{overflow-x:auto;border:1px solid var(--line);border-radius:10px}
+table{width:100%;border-collapse:collapse;min-width:620px}
+td,th{text-align:right;padding:13px;border-bottom:1px solid #29465d;font-size:14px}
+th{color:#e8c688;background:#1c3951}
+tbody tr:hover{background:#20394d}
+.muted{color:var(--muted)}.error{color:#ffc6a9}strong{font-size:19px}
+.flash{border-color:#7e6945;background:#2a2c2b}
+.mobile-toggle,.mobile-backdrop{display:none}
+.auth-shell{min-height:100vh;display:grid;place-items:center;padding:20px}
+.auth-container{width:min(100%,450px)}
+.auth-brand{justify-content:center;border:0;padding-bottom:25px}
+.auth-container .panel{padding:clamp(24px,4vw,38px)}
+.auth-container .panel h2{text-align:center;margin-bottom:24px}
+.auth-container .panel form button{width:100%}
+@media(max-width:980px){
+.app-shell{grid-template-columns:minmax(0,1fr)}
+.sidebar{position:fixed;z-index:30;right:0;top:0;width:min(300px,85vw);height:100dvh;transform:translateX(105%);transition:transform .2s ease;box-shadow:-10px 0 30px #0005}
+.mobile-toggle{display:inline-flex;align-items:center;justify-content:center;min-width:42px;height:42px;padding:0 10px;background:#20384b;color:#f5d59a;border:1px solid #456078;font-size:23px}
+.mobile-backdrop{display:block;position:fixed;inset:0;z-index:20;background:#0009;opacity:0;pointer-events:none;transition:opacity .2s}
+#nav-open:checked~.app-shell .sidebar{transform:translateX(0)}
+#nav-open:checked~.app-shell .mobile-backdrop{opacity:1;pointer-events:auto}
+}
+@media(max-width:600px){
+.topbar{padding:13px 14px;min-height:66px}.workspace-tag{display:none}
+main{padding:14px}.panel{margin-bottom:12px}.grid{gap:10px}table{min-width:550px}
+}
+@media(prefers-reduced-motion:reduce){.sidebar,.mobile-backdrop{transition:none}}
 </style>
 """
 BASE = """<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>PORTEXA Operations</title>""" + CSS + """</head><body>
-<header><h1>PORTEXA · إدارة مهام التتبع</h1><nav>
-{% if user %}<a href="{{ url_for('home') }}">الرئيسية</a><a href="{{ url_for('notifications') }}">الإشعارات</a>
-<form method="post" action="{{ url_for('logout') }}" style="display:inline"><input type="hidden" name="csrf" value="{{ csrf }}"><button>خروج</button></form>
-{% endif %}</nav></header><main>
-{% for msg in get_flashed_messages() %}<p class="panel">{{ msg }}</p>{% endfor %}
-{{ body|safe }}</main></body></html>"""
-
+{% if user %}
+<input type="checkbox" id="nav-open" hidden aria-label="فتح القائمة الجانبية">
+<div class="app-shell">
+<label for="nav-open" class="mobile-backdrop" aria-label="إغلاق القائمة"></label>
+<aside class="sidebar" aria-label="القائمة الرئيسية">
+  <div class="brand"><span class="brand-mark">P</span><div><strong>PORTEXA</strong><small>OPERATIONS CENTER</small></div></div>
+  <div><div class="side-label">مساحة العمل</div><nav class="side-nav" aria-label="التنقل">
+    <a href="{{ url_for('home') }}" class="{{ 'active' if request.path == url_for('home') else '' }}"><span class="nav-symbol" aria-hidden="true">▦</span>{{ 'مهامي وشحناتي' if user.role == 'operator' else 'لوحة التحكم' }}</a>
+    <a href="{{ url_for('notifications') }}" class="{{ 'active' if request.path == url_for('notifications') else '' }}"><span class="nav-symbol" aria-hidden="true">◉</span>الإشعارات</a>
+    {% if user.role in ('admin','supervisor') %}
+    <a href="{{ url_for('distribution_preview_page') }}" class="{{ 'active' if request.path == url_for('distribution_preview_page') else '' }}"><span class="nav-symbol" aria-hidden="true">⇄</span>معاينة التوزيع</a>
+    <a href="{{ url_for('source_statuses_page') }}" class="{{ 'active' if request.path == url_for('source_statuses_page') else '' }}"><span class="nav-symbol" aria-hidden="true">≋</span>حالات الشحنات</a>
+    {% endif %}
+  </nav></div>
+  <div class="sidebar-footer">
+    <div class="profile-name">{{ user.full_name }}</div>
+    <div class="profile-role">{{ {'admin':'مدير النظام','supervisor':'مشرف','operator':'موظف تتبع'}.get(user.role,user.role) }}</div>
+    <form method="post" action="{{ url_for('logout') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit">تسجيل الخروج</button></form>
+  </div>
+</aside>
+<div class="workspace">
+  <div class="topbar"><div style="display:flex;align-items:center;gap:12px"><label for="nav-open" class="mobile-toggle" role="button" tabindex="0" aria-label="فتح القائمة">☰</label><div><h1>{{ 'إدارة مهام التتبع' if user.role == 'operator' else 'مركز إدارة العمليات' }}</h1><p>PORTEXA / Operations</p></div></div><span class="workspace-tag">مساحة عمل آمنة</span></div>
+  <main>{% for msg in get_flashed_messages() %}<p class="panel flash" role="status">{{ msg }}</p>{% endfor %}{{ body|safe }}</main>
+</div></div>
+{% else %}
+<div class="auth-shell"><div class="auth-container">
+<div class="brand auth-brand"><span class="brand-mark">P</span><div><strong>PORTEXA</strong><small>OPERATIONS CENTER</small></div></div>
+<main>{% for msg in get_flashed_messages() %}<p class="panel flash" role="status">{{ msg }}</p>{% endfor %}{{ body|safe }}</main>
+</div></div>
+{% endif %}
+</body></html>"""
 
 def db():
     conn = connect()
