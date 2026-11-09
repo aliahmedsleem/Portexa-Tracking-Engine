@@ -189,6 +189,9 @@ def save_shipment_bundle(shipment_id, values, expected, containers, expected_con
             raise RuntimeError("Container movements changed; reload before saving")
         if existing and not cleaned:
             raise ValueError("Removing every container is blocked; retain at least one container")
+        declared_count = conn.execute("SELECT containers_count FROM shipment WHERE id=?", (int(shipment_id),)).fetchone()[0]
+        if not existing and declared_count and int(declared_count) > 0 and len(cleaned) < int(declared_count):
+            raise ValueError("The shipment already declares more containers than provided; add all containers before saving")
         changed = any(validated[k] != current[k] for k in EDITABLE) or cleaned != existing
         if not changed:
             return False
