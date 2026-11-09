@@ -3,12 +3,13 @@
 Run on loopback behind a trusted HTTPS reverse proxy. Uses Flask sessions, CSRF, and role checks.
 """
 import os
+import json
 import secrets
 from functools import wraps
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 from portexa_tracking import operations_shipment_edit as edit
 from portexa_tracking import manual_routes as routes
-from portexa_tracking.portexa_bridge import get_source_shipment
+from portexa_tracking.portexa_bridge import get_source_shipment, read_container_movements, save_shipment_bundle, MOVEMENT_FIELDS
 from flask import Flask, abort, flash, redirect, render_template_string, request, session, url_for
 from markupsafe import escape
 from portexa_tracking.database import connect
@@ -23,7 +24,7 @@ app.config.update(
     SESSION_COOKIE_SAMESITE="Strict",
     SESSION_COOKIE_SECURE=os.environ.get("PORTEXA_OPS_HTTPS") == "1",
     PERMANENT_SESSION_LIFETIME=3600,
-    MAX_CONTENT_LENGTH=16384,
+    MAX_CONTENT_LENGTH=131072,
 )
 CSS = """
 <style>
@@ -90,7 +91,7 @@ input[type="hidden"],input[hidden],#nav-open{display:none!important}\n.mobile-to
 main{padding:14px}.panel{margin-bottom:12px}.grid{gap:10px}table{min-width:550px}
 }
 @media(prefers-reduced-motion:reduce){.sidebar,.mobile-backdrop{transition:none}}
-</style>
+.container-item{border:1px solid #456078;border-radius:12px;margin:14px 0;padding:16px;min-width:0}.container-item legend{color:#f2d39b;font-weight:700}.bundle-actions{display:flex;flex-wrap:wrap;gap:10px;margin:16px 0}.bundle-actions button,.remove-container{background:#273e51;color:#f2d39b;border:1px solid #4a6276}.bundle-save{width:100%;max-width:420px}</style>
 """
 BASE = """<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>PORTEXA Operations</title>""" + CSS + """</head><body>
 {% if user %}
@@ -123,7 +124,7 @@ BASE = """<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><
 <main>{% for msg in get_flashed_messages() %}<p class="panel flash" role="status">{{ msg }}</p>{% endfor %}{{ body|safe }}</main>
 </div></div>
 {% endif %}
-</body></html>"""
+<script>document.addEventListener('click',function(e){const add=e.target.closest('.add-container'),remove=e.target.closest('.remove-container'),copy=e.target.closest('.copy-movement');if(!add&&!remove&&!copy)return;const form=e.target.closest('.shipment-bundle');if(!form)return;const list=form.querySelector('.container-list');if(add){list.append(form.querySelector('.container-template').content.cloneNode(true));return;}if(remove){remove.closest('.container-item').remove();return;}if(copy){const items=[...list.querySelectorAll('.container-item')];if(items.length<2)return;for(const item of items.slice(1)){for(const source of items[0].querySelectorAll('[name^="move_"]')){const dest=item.querySelector('[name="'+source.name+'"]');if(dest)dest.value=source.value;}}}});</script></body></html>"""
 
 def db():
     conn = connect()
@@ -231,11 +232,12 @@ def home():
                     task["source_error"] = None
                     task["can_edit"] = False
                     task["route"] = routes.get_routes([task["shipment_id"]]).get(task["shipment_id"]) if task["shipment"] else None
+                    task["containers"] = read_container_movements(task["shipment_id"]) if task["shipment"] else []
                     if task["shipment"] and task["status"] in ("pending", "rejected"):
                         edit.authorized_task(conn, u["id"], task["id"])
                         task["can_edit"] = True
                         task["snapshot"] = snapshot_token(task["id"], task["shipment"])
-                        task["route_snapshot"] = snapshot_signer().dumps({"task_id":task["id"],"updated_at":task["route"]["updated_at"] if task["route"] else None})
+                        task["bundle_snapshot"] = snapshot_signer().dumps({"task_id":task["id"],"values":{k:task["shipment"][k] for k in edit.FIELDS},"containers":task["containers"]})
                 except (OSError, ValueError, RuntimeError, PermissionError) as exc:
                     task["shipment"] = None
                     task["source_error"] = "تعذر قراءة بيانات الشحنة"
@@ -270,25 +272,25 @@ def home():
 <div><label>حالة الشحنة (للعرض)</label><p>{{ t.shipment.status or 'غير محددة' }}</p></div>
 </div>
 {% if t.can_edit %}
-<form method="post" action="{{ url_for('save_shipment_edit',task_id=t.id) }}">
-<input type="hidden" name="csrf" value="{{ csrf }}">
-<input type="hidden" name="snapshot" value="{{ t.snapshot }}">
-<div class="grid">
+<form method="post" action="{{ url_for('save_shipment_bundle_page',task_id=t.id) }}" class="shipment-bundle">
+<input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="snapshot" value="{{ t.bundle_snapshot }}">
+<h3>معلومات الشحنة</h3><div class="grid">
 <label>رقم البوليصة<input name="bol_no" maxlength="120" value="{{ t.shipment.bol_no or '' }}"></label>
 <label>رقم التتبع<input name="msc_tracking" maxlength="300" value="{{ t.shipment.msc_tracking or '' }}"></label>
 <label>تاريخ الشحن<input type="date" name="ship_date" value="{{ t.shipment.ship_date or '' }}"></label>
-<label>تاريخ الوصول<input type="date" name="arrival_date" value="{{ t.shipment.arrival_date or '' }}"></label>
-</div>
+<label>تاريخ الوصول<input type="date" name="arrival_date" value="{{ t.shipment.arrival_date or '' }}"></label></div>
 <label>تفاصيل الشحن<textarea name="shipping_details" maxlength="2000">{{ t.shipment.shipping_details or '' }}</textarea></label>
-<button type="submit">حفظ بيانات الشحنة في PORTEXA</button></form>
-<form method="post" action="{{ url_for('save_shipment_route',task_id=t.id) }}">
-<input type="hidden" name="csrf" value="{{ csrf }}">
-<input type="hidden" name="route_snapshot" value="{{ t.route_snapshot }}">
-<div class="grid">
-{% for key,label in route_labels %}
-<label>{{ label }}<input type="{{ 'datetime-local' if key in ('etd','eta') else 'text' }}" name="{{ key }}" {% if key in ('etd','eta') %}step="60"{% else %}maxlength="{{ 1500 if key=='operator_notes' else 200 }}"{% endif %} value="{{ ((t.route[key][:16].replace(' ', 'T') if t.route[key]|length > 10 else t.route[key] ~ 'T00:00') if key in ('etd','eta') else t.route[key]) if t.route and t.route[key] else '' }}"></label>
-{% endfor %}
-</div><button type="submit">حفظ مسار الشحنة والموانئ</button></form>
+<h3>الحاويات وحركة النقل</h3><div class="container-list">
+{% for c in t.containers %}<fieldset class="container-item"><legend>حاوية {{ loop.index }}</legend>
+<div class="grid"><label>رقم الحاوية<input name="container_number" value="{{ c.container_number }}" required maxlength="30"></label>
+{% for key,label in movement_labels %}<label>{{ label }}<input name="move_{{ key }}" value="{{ c[key] or '' }}" maxlength="{{ 1500 if key=='operator_notes' else 200 }}"></label>{% endfor %}
+</div><button type="button" class="remove-container">حذف الحاوية</button></fieldset>{% endfor %}</div>
+<template class="container-template"><fieldset class="container-item"><legend>حاوية جديدة</legend><div class="grid">
+<label>رقم الحاوية<input name="container_number" maxlength="30" required></label>
+{% for key,label in movement_labels %}<label>{{ label }}<input name="move_{{ key }}" maxlength="{{ 1500 if key=='operator_notes' else 200 }}"></label>{% endfor %}
+</div><button type="button" class="remove-container">حذف الحاوية</button></fieldset></template>
+<div class="bundle-actions"><button type="button" class="add-container">+ إضافة حاوية</button><button type="button" class="copy-movement">نسخ حركة الأولى إلى جميع الحاويات</button></div>
+<button type="submit" class="bundle-save">حفظ جميع التحديثات في PORTEXA</button></form>
 {% else %}
 <div class="grid">
 <div>البوليصة: {{ t.shipment.bol_no or '—' }}</div>
@@ -308,7 +310,7 @@ def home():
 <option value="0">تم التحقق — لا يوجد تغيير</option>
 <option value="1">تم تحديث بيانات الشحنة</option></select></label>
 <button>إرسال للمراجعة</button></form>{% endif %}</section>
-{% else %}<section class="panel">لا توجد مهام حالياً</section>{% endfor %}""",tasks=tasks,route_labels=ROUTE_LABELS,bol_filter=bol_filter,all_count=all_count,with_bol=with_bol,without_bol=without_bol)
+{% else %}<section class="panel">لا توجد مهام حالياً</section>{% endfor %}""",tasks=tasks,route_labels=ROUTE_LABELS,movement_labels=[(k,v) for k,v in ROUTE_LABELS if k!="container_number"],bol_filter=bol_filter,all_count=all_count,with_bol=with_bol,without_bol=without_bol)
         stats = ops.dashboard_stats(conn, u["id"])
         users = [dict(r) for r in conn.execute("SELECT id,full_name,phone,username,role,active FROM ops_users ORDER BY id")]
         assignments = dist.assignment_history(conn)
@@ -340,6 +342,36 @@ def home():
 <section class="panel"><h2>إرسال إشعار</h2><form method="post" action="{{ url_for('send_notice') }}"><input type="hidden" name="csrf" value="{{ csrf }}">
 <label>المستخدم<select name="user_id">{% for x in users if x.active %}<option value="{{ x.id }}">{{ x.full_name }}</option>{% endfor %}</select></label>
 <label>العنوان<input name="title" required></label><label>الرسالة<textarea name="body" required></textarea></label><button>إرسال</button></form></section>""", stats=stats, users=users, pending=pending, assignments=assignments)
+
+
+@app.post("/tasks/<int:task_id>/bundle/save")
+@require("operator")
+def save_shipment_bundle_page(task_id):
+    try:
+        signed = snapshot_signer().loads(request.form.get("snapshot", ""), max_age=3600)
+        if not isinstance(signed, dict) or signed.get("task_id") != task_id:
+            abort(403)
+        numbers = request.form.getlist("container_number")
+        movements = {k: request.form.getlist("move_" + k) for k in MOVEMENT_FIELDS}
+        if any(len(items) != len(numbers) for items in movements.values()):
+            raise ValueError("حقول الحاويات غير متطابقة")
+        containers = [dict(container_number=number, **{k: movements[k][i] for k in MOVEMENT_FIELDS})
+                      for i, number in enumerate(numbers)]
+        with db() as conn:
+            task = edit.authorized_task(conn, current_user()["id"], task_id)
+            values = {k: request.form.get(k, "") for k in edit.FIELDS}
+            changed = save_shipment_bundle(task["shipment_id"], values, signed["values"],
+                                           containers, signed["containers"])
+            with conn:
+                ops.audit(conn, current_user()["id"], "shipment.bundle.saved", "shipment",
+                          task["shipment_id"], "changed=" + str(bool(changed)) +
+                          ";containers=" + str(len(containers)))
+        flash("تم حفظ معلومات الشحنة والحاويات مباشرة في PORTEXA" if changed else "لا توجد تغييرات للحفظ")
+    except (BadSignature, SignatureExpired, KeyError, TypeError):
+        flash("انتهت صلاحية النموذج؛ حدّث الصفحة")
+    except (ValueError, LookupError, PermissionError, RuntimeError, OSError) as exc:
+        flash("تعذر حفظ التحديثات: " + str(exc))
+    return redirect(url_for("home"))
 
 
 @app.post("/tasks/<int:task_id>/route/save")
