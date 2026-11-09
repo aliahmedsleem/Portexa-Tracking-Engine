@@ -58,6 +58,20 @@ def init_operations(conn):
       amount_iqd INTEGER NOT NULL CHECK(amount_iqd > 0),
       note TEXT, paid_at TEXT NOT NULL, recorded_by INTEGER NOT NULL REFERENCES ops_users(id)
     );
+    CREATE TABLE IF NOT EXISTS ops_shipment_change_log(
+      id INTEGER PRIMARY KEY,
+      task_id INTEGER NOT NULL REFERENCES ops_tasks(id),
+      shipment_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL REFERENCES ops_users(id),
+      original_values TEXT NOT NULL,
+      updated_values TEXT NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('pending','applied','failed','conflict')),
+      error_message TEXT,
+      created_at TEXT NOT NULL,
+      applied_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_ops_change_log_shipment
+      ON ops_shipment_change_log(shipment_id,created_at);
     CREATE TABLE IF NOT EXISTS ops_audit(
       id INTEGER PRIMARY KEY, actor_id INTEGER, action TEXT NOT NULL,
       target_type TEXT NOT NULL, target_id INTEGER, details TEXT, created_at TEXT NOT NULL
