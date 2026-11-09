@@ -5,6 +5,9 @@ Run only on loopback behind SSH tunnel. Uses Flask sessions, CSRF, and role chec
 import os
 import secrets
 from functools import wraps
+from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
+from portexa_tracking import operations_shipment_edit as edit
+from portexa_tracking.portexa_bridge import get_source_shipment
 from flask import Flask, abort, flash, redirect, render_template_string, request, session, url_for
 from markupsafe import escape
 from portexa_tracking.database import connect
@@ -70,6 +73,14 @@ def current_user():
     with db() as conn:
         row = conn.execute("SELECT id,full_name,role,active FROM ops_users WHERE id=?", (uid,)).fetchone()
         return dict(row) if row and row["active"] else None
+
+
+def snapshot_signer():
+    return URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="portexa-shipment-edit-v1")
+
+
+def snapshot_token(task_id, shipment):
+    return snapshot_signer().dumps({"task_id":task_id, "values":{k:shipment[k] for k in edit.FIELDS}})
 
 
 def token():
@@ -139,16 +150,59 @@ def home():
     with db() as conn:
         if u["role"] == "operator":
             tasks = ops.my_tasks(conn, u["id"])
-            return page("""<section class="panel"><h2>مهامي</h2><p>عدد المهام: {{ tasks|length }}</p></section>
+            for task in tasks:
+                try:
+                    task["shipment"] = get_source_shipment(task["shipment_id"])
+                    task["source_error"] = None
+                    task["can_edit"] = False
+                    if task["shipment"] and task["status"] in ("pending", "rejected"):
+                        edit.authorized_task(conn, u["id"], task["id"])
+                        task["can_edit"] = True
+                        task["snapshot"] = snapshot_token(task["id"], task["shipment"])
+                except (OSError, ValueError, RuntimeError, PermissionError) as exc:
+                    task["shipment"] = None
+                    task["source_error"] = "تعذر قراءة بيانات الشحنة"
+            return page("""<section class="panel"><h2>البوالص المسندة إليّ</h2>
+<p>عدد المهام: {{ tasks|length }}</p>
+<p class="muted">التعديل يحفظ بيانات الشحنة مباشرة عند تفعيل الكتابة، واعتماد المراجعة والأجر إجراء منفصل.</p></section>
 {% for t in tasks %}<section class="panel"><h3>شحنة #{{ t.shipment_id }}</h3>
 <p>الدورة: {{ t.cycle_at }} · الحالة: {{ t.status }} · الأجر: {{ t.price_iqd }} د.ع</p>
-{% if t.status in ('pending','rejected') %}<form method="post" action="{{ url_for('submit',task_id=t.id) }}">
+{% if t.shipment %}
+<div class="grid">
+<div><label>رقم الفاتورة (للعرض)</label><p>{{ t.shipment.invoice_no or 'غير مسجل' }}</p></div>
+<div><label>حالة الشحنة (للعرض)</label><p>{{ t.shipment.status or 'غير محددة' }}</p></div>
+</div>
+{% if t.can_edit %}
+<form method="post" action="{{ url_for('save_shipment_edit',task_id=t.id) }}">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<input type="hidden" name="snapshot" value="{{ t.snapshot }}">
+<div class="grid">
+<label>رقم البوليصة<input name="bol_no" maxlength="120" value="{{ t.shipment.bol_no or '' }}"></label>
+<label>رقم التتبع<input name="msc_tracking" maxlength="300" value="{{ t.shipment.msc_tracking or '' }}"></label>
+<label>تاريخ الشحن<input type="date" name="ship_date" value="{{ t.shipment.ship_date or '' }}"></label>
+<label>تاريخ الوصول<input type="date" name="arrival_date" value="{{ t.shipment.arrival_date or '' }}"></label>
+</div>
+<label>تفاصيل الشحن<textarea name="shipping_details" maxlength="2000">{{ t.shipment.shipping_details or '' }}</textarea></label>
+<button type="submit">حفظ التعديلات في PORTEXA</button></form>
+{% else %}
+<div class="grid">
+<div>البوليصة: {{ t.shipment.bol_no or '—' }}</div>
+<div>التتبع: {{ t.shipment.msc_tracking or '—' }}</div>
+<div>تاريخ الشحن: {{ t.shipment.ship_date or '—' }}</div>
+<div>تاريخ الوصول: {{ t.shipment.arrival_date or '—' }}</div></div>
+<p style="white-space:pre-wrap;overflow-wrap:anywhere">{{ t.shipment.shipping_details or 'لا توجد تفاصيل' }}</p>
+{% endif %}
+{% else %}<p class="error">{{ t.source_error or 'الشحنة غير موجودة في المصدر' }}</p>{% endif %}
+{% if t.status in ('pending','rejected') %}
+<form method="post" action="{{ url_for('submit',task_id=t.id) }}">
 <input type="hidden" name="csrf" value="{{ csrf }}">
 <label>مصدر المراجعة<input name="source" required maxlength="500"></label>
 <label>ملاحظات المراجعة<textarea name="note" required maxlength="2000"></textarea></label>
-<label>نتيجة المراجعة<select name="changed"><option value="0">تم التحقق — لا يوجد تغيير</option><option value="1">تم تحديث البيانات</option></select></label>
+<label>نتيجة المراجعة<select name="changed">
+<option value="0">تم التحقق — لا يوجد تغيير</option>
+<option value="1">تم تحديث بيانات الشحنة</option></select></label>
 <button>إرسال للمراجعة</button></form>{% endif %}</section>
-{% else %}<section class="panel">لا توجد مهام حالياً</section>{% endfor %}""", tasks=tasks)
+{% else %}<section class="panel">لا توجد مهام حالياً</section>{% endfor %}""",tasks=tasks)
         stats = ops.dashboard_stats(conn, u["id"])
         users = [dict(r) for r in conn.execute("SELECT id,full_name,phone,username,role,active FROM ops_users ORDER BY id")]
         assignments = dist.assignment_history(conn)
@@ -186,6 +240,24 @@ def home():
 <section class="panel"><h2>إرسال إشعار</h2><form method="post" action="{{ url_for('send_notice') }}"><input type="hidden" name="csrf" value="{{ csrf }}">
 <label>المستخدم<select name="user_id">{% for x in users if x.active %}<option value="{{ x.id }}">{{ x.full_name }}</option>{% endfor %}</select></label>
 <label>العنوان<input name="title" required></label><label>الرسالة<textarea name="body" required></textarea></label><button>إرسال</button></form></section>""", stats=stats, users=users, pending=pending, assignments=assignments)
+
+
+@app.post("/tasks/<int:task_id>/shipment/save")
+@require("operator")
+def save_shipment_edit(task_id):
+    try:
+        signed = snapshot_signer().loads(request.form.get("snapshot", ""), max_age=3600)
+        if not isinstance(signed, dict) or signed.get("task_id") != task_id:
+            abort(403)
+        values = {key:request.form.get(key, "") for key in edit.FIELDS}
+        with db() as conn:
+            result = edit.save_shipment(conn, current_user()["id"], task_id, values, signed["values"])
+        flash("تم حفظ التحديث في PORTEXA" if result["changed"] else "لا توجد تغييرات للحفظ")
+    except (BadSignature, SignatureExpired, KeyError, TypeError):
+        flash("انتهت صلاحية النموذج؛ حدّث الصفحة وحاول مجدداً")
+    except (ValueError, LookupError, PermissionError, RuntimeError, OSError) as exc:
+        flash("تعذر حفظ بيانات الشحنة: " + str(exc))
+    return redirect(url_for("home"))
 
 
 def action(callback):
@@ -335,7 +407,7 @@ def main():
         raise SystemExit("Set PORTEXA_OPS_SECRET_KEY to a persistent random secret before starting")
     with db():
         pass
-    app.run(host="127.0.0.1",port=int(os.environ.get("PORTEXA_OPS_PORT","8766")),debug=False)
+    app.run(host=os.environ.get("PORTEXA_OPS_HOST", "127.0.0.1"),port=int(os.environ.get("PORTEXA_OPS_PORT","8766")),debug=False)
 
 
 if __name__=="__main__":
