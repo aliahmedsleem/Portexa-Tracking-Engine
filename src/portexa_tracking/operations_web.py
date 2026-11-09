@@ -361,7 +361,7 @@ def save_shipment_bundle_page(task_id):
             task = edit.authorized_task(conn, current_user()["id"], task_id)
             values = {k: request.form.get(k, "") for k in edit.FIELDS}
             changed = save_shipment_bundle(task["shipment_id"], values, signed["values"],
-                                           containers, signed["containers"])
+                                           containers, signed["containers"], actor_id=current_user()["id"])
             with conn:
                 ops.audit(conn, current_user()["id"], "shipment.bundle.saved", "shipment",
                           task["shipment_id"], "changed=" + str(bool(changed)) +
