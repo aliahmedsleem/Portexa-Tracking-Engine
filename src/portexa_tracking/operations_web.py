@@ -70,7 +70,7 @@ th{color:#e8c688;background:#1c3951}
 tbody tr:hover{background:#20394d}
 .muted{color:var(--muted)}.error{color:#ffc6a9}strong{font-size:19px}
 .flash{border-color:#7e6945;background:#2a2c2b}
-.mobile-toggle,.mobile-backdrop{display:none}
+input[type="hidden"],input[hidden],#nav-open{display:none!important}\n.mobile-toggle,.mobile-backdrop{display:none}
 .auth-shell{min-height:100vh;display:grid;place-items:center;padding:20px}
 .auth-container{width:min(100%,450px)}
 .auth-brand{justify-content:center;border:0;padding-bottom:25px}
@@ -114,7 +114,7 @@ BASE = """<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><
   </div>
 </aside>
 <div class="workspace">
-  <div class="topbar"><div style="display:flex;align-items:center;gap:12px"><label for="nav-open" class="mobile-toggle" role="button" tabindex="0" aria-label="فتح القائمة">☰</label><div><h1>{{ 'إدارة مهام التتبع' if user.role == 'operator' else 'مركز إدارة العمليات' }}</h1><p>PORTEXA / Operations</p></div></div><span class="workspace-tag">مساحة عمل آمنة</span></div>
+  <div class="topbar"><div style="display:flex;align-items:center;gap:12px"><label for="nav-open" class="mobile-toggle" role="button" tabindex="0" aria-label="فتح القائمة">☰</label><div><h1>{{ 'إدارة مهام التتبع' if user.role == 'operator' else 'مركز إدارة العمليات' }}</h1><p>PORTEXA / Operations</p></div></div></div>
   <main>{% for msg in get_flashed_messages() %}<p class="panel flash" role="status">{{ msg }}</p>{% endfor %}{{ body|safe }}</main>
 </div></div>
 {% else %}
