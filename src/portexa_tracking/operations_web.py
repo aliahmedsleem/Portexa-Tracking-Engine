@@ -101,7 +101,7 @@ BASE = """<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><
   <div class="brand"><span class="brand-mark">P</span><div><strong>PORTEXA</strong><small>OPERATIONS CENTER</small></div></div>
   <div><div class="side-label">مساحة العمل</div><nav class="side-nav" aria-label="التنقل">
     <a href="{{ url_for('home') }}" class="{{ 'active' if request.path == url_for('home') else '' }}"><span class="nav-symbol" aria-hidden="true">▦</span>{{ 'مهامي وشحناتي' if user.role == 'operator' else 'لوحة التحكم' }}</a>
-    <a href="{{ url_for('notifications') }}" class="{{ 'active' if request.path == url_for('notifications') else '' }}"><span class="nav-symbol" aria-hidden="true">◉</span>الإشعارات</a>
+    {% if user.role in ('admin','supervisor') %}<a href="{{ url_for('users_page') }}" class="{{ 'active' if request.path.startswith('/users') else '' }}"><span class="nav-symbol" aria-hidden="true">♙</span>إدارة المستخدمين</a>{% endif %}\n    <a href="{{ url_for('notifications') }}" class="{{ 'active' if request.path == url_for('notifications') else '' }}"><span class="nav-symbol" aria-hidden="true">◉</span>الإشعارات</a>
     {% if user.role in ('admin','supervisor') %}
     <a href="{{ url_for('distribution_preview_page') }}" class="{{ 'active' if request.path == url_for('distribution_preview_page') else '' }}"><span class="nav-symbol" aria-hidden="true">⇄</span>معاينة التوزيع</a>
     <a href="{{ url_for('source_statuses_page') }}" class="{{ 'active' if request.path == url_for('source_statuses_page') else '' }}"><span class="nav-symbol" aria-hidden="true">≋</span>حالات الشحنات</a>
@@ -318,13 +318,7 @@ def home():
 <section class="panel"><h3>البوالص المسندة</h3><strong>{{ stats.assignments }}</strong></section>
 <section class="panel"><h3>نسبة الاعتماد</h3><strong>{{ stats.approval_rate }}%</strong></section>
 <section class="panel"><h3>بانتظار المراجعة</h3><strong>{{ stats.tasks.get('submitted',0) }}</strong></section></div>
-<section class="panel"><h2>المستخدمون</h2><div class="scroll"><table><tr><th>الاسم</th><th>الهاتف</th><th>الدور</th><th>الحالة</th><th>المستحقات</th></tr>
-{% for x in users %}<tr><td>{{ x.full_name }}</td><td>{{ x.phone }}</td><td>{{ x.role }}</td><td>{{ 'نشط' if x.active else 'موقوف' }}</td><td><a href="{{ url_for('user_payroll',user_id=x.id) }}">كشف حساب</a></td></tr>{% endfor %}</table></div></section>
-{% if user.role=='admin' %}<section class="panel"><h2>إضافة موظف</h2><form method="post" action="{{ url_for('add_user') }}">
-<input type="hidden" name="csrf" value="{{ csrf }}"><div class="grid">
-<label>الاسم الكامل<input name="name" required></label><label>رقم الهاتف<input name="phone" required></label>
-<label>اسم المستخدم<input name="username" required></label><label>كلمة المرور<input type="password" name="password" minlength="12" required></label>
-<label>الصلاحية<select name="role"><option value="operator">موظف</option><option value="supervisor">مشرف</option></select></label></div><button>إضافة</button></form></section>{% endif %}
+<section class="panel"><h2>إدارة المستخدمين</h2><p class="muted">عرض حسابات الموظفين وتفاصيلهم وتعديلها من صفحة مستقلة.</p><a href="{{ url_for('users_page') }}">فتح إدارة المستخدمين</a></section>
 <section class="panel"><h2>التوزيع التلقائي العادل</h2>
 <p class="muted">تُسند البوالص الجديدة تلقائياً إلى الموظفين الأقل حملاً، وتبقى الإسنادات السابقة محفوظة.</p>
 <p><a href="{{ url_for('distribution_preview_page') }}">معاينة توزيع البوالص والأحمال قبل التنفيذ</a> · <a href="{{ url_for('source_statuses_page') }}">فحص حالات الشحنات الأصلية</a></p>
@@ -403,6 +397,107 @@ def action(callback):
 @require("admin")
 def add_user():
     return action(lambda c,a: ops.create_user(c,a,request.form["name"],request.form["phone"],request.form["username"],request.form["password"],request.form.get("role","operator")))
+
+
+@app.get("/users")
+@require("admin", "supervisor")
+def users_page():
+    with db() as conn:
+        rows = [dict(r) for r in conn.execute(
+            """SELECT u.id,u.full_name,u.phone,u.username,u.role,u.active,u.created_at,
+               (SELECT COUNT(*) FROM ops_assignments a WHERE a.user_id=u.id AND a.active=1) assigned,
+               (SELECT COUNT(*) FROM ops_tasks t WHERE t.user_id=u.id) tasks
+               FROM ops_users u ORDER BY u.active DESC,u.id DESC"""
+        )]
+    return page("""<section class="panel"><h2>إدارة المستخدمين</h2>
+<p class="muted">الحسابات المسجلة: {{ rows|length }} · النشطة: {{ rows|selectattr('active')|list|length }}</p>
+<div class="scroll"><table><thead><tr><th>الموظف</th><th>اسم الدخول</th><th>الصلاحية</th><th>الحالة</th><th>الشحنات</th><th>المهام</th><th>الإجراءات</th></tr></thead><tbody>
+{% for x in rows %}<tr><td><b>{{ x.full_name }}</b><div class="muted">{{ x.phone }}</div></td>
+<td>{{ x.username }}</td><td>{{ {'admin':'مدير','supervisor':'مشرف','operator':'موظف'}.get(x.role,x.role) }}</td>
+<td>{{ 'نشط' if x.active else 'موقوف' }}</td><td>{{ x.assigned }}</td><td>{{ x.tasks }}</td>
+<td><a href="{{ url_for('user_details',user_id=x.id) }}">التفاصيل</a> · <a href="{{ url_for('user_payroll',user_id=x.id) }}">المستحقات</a></td></tr>
+{% else %}<tr><td colspan="7">لا يوجد مستخدمون</td></tr>{% endfor %}
+</tbody></table></div></section>
+{% if user.role=='admin' %}<section class="panel"><h2>إضافة مستخدم جديد</h2>
+<form method="post" action="{{ url_for('add_user') }}"><input type="hidden" name="csrf" value="{{ csrf }}">
+<div class="grid"><label>الاسم الكامل<input name="name" maxlength="120" required></label>
+<label>الهاتف<input name="phone" maxlength="40" required></label>
+<label>اسم المستخدم<input name="username" maxlength="80" required></label>
+<label>الصلاحية<select name="role"><option value="operator">موظف</option><option value="supervisor">مشرف</option></select></label></div>
+<label>كلمة المرور الأولية<input type="password" id="new-user-password" name="password" minlength="12" required autocomplete="new-password"></label>
+<label><input type="checkbox" style="display:inline;width:auto;min-height:auto;margin:0 0 0 8px" onchange="document.getElementById('new-user-password').type=this.checked?'text':'password'">إظهار كلمة المرور المدخلة</label>
+<button type="submit">إنشاء الحساب</button></form></section>{% endif %}""", rows=rows)
+
+
+@app.get("/users/<int:user_id>")
+@require("admin", "supervisor")
+def user_details(user_id):
+    with db() as conn:
+        row = conn.execute(
+            "SELECT id,full_name,phone,username,role,active,created_at FROM ops_users WHERE id=?",
+            (user_id,)
+        ).fetchone()
+    if row is None:
+        abort(404)
+    return page("""<section class="panel"><p><a href="{{ url_for('users_page') }}">العودة لإدارة المستخدمين</a></p>
+<h2>تفاصيل المستخدم: {{ x.full_name }}</h2>
+<div class="grid"><div><span class="muted">رقم الحساب</span><p>#{{ x.id }}</p></div>
+<div><span class="muted">تاريخ الإنشاء</span><p>{{ x.created_at }}</p></div></div></section>
+<section class="panel"><h2>معلومات الحساب</h2>
+{% if user.role=='admin' %}
+<form method="post" action="{{ url_for('save_user_details',user_id=x.id) }}"><input type="hidden" name="csrf" value="{{ csrf }}">
+<div class="grid"><label>الاسم الكامل<input name="full_name" maxlength="120" value="{{ x.full_name }}" required></label>
+<label>رقم الهاتف<input name="phone" maxlength="40" value="{{ x.phone }}" required></label>
+<label>اسم الدخول<input name="username" maxlength="80" value="{{ x.username }}" required></label>
+<label>الصلاحية<select name="role">{% for role,title in [('operator','موظف'),('supervisor','مشرف'),('admin','مدير')] %}
+<option value="{{ role }}" {% if x.role==role %}selected{% endif %}>{{ title }}</option>{% endfor %}</select></label>
+<label>حالة الحساب<select name="active"><option value="1" {% if x.active %}selected{% endif %}>نشط</option><option value="0" {% if not x.active %}selected{% endif %}>موقوف</option></select></label></div>
+<button type="submit">حفظ التعديلات</button></form>
+{% else %}<div class="grid"><p>الهاتف: {{ x.phone }}</p><p>اسم الدخول: {{ x.username }}</p><p>الصلاحية: {{ x.role }}</p><p>الحالة: {{ 'نشط' if x.active else 'موقوف' }}</p></div>{% endif %}
+</section>
+{% if user.role=='admin' %}<section class="panel"><h2>تغيير كلمة المرور</h2>
+<p class="muted">لا يمكن عرض كلمة المرور القديمة لأنها محفوظة كتجزئة آمنة. يمكنك تعيين كلمة مرور جديدة.</p>
+<form method="post" action="{{ url_for('change_user_password',user_id=x.id) }}">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<label>كلمة المرور الجديدة<input id="reset-password" type="password" name="password" minlength="12" required autocomplete="new-password"></label>
+<label>تأكيد كلمة المرور<input id="reset-confirm" type="password" name="confirm" minlength="12" required autocomplete="new-password"></label>
+<label><input type="checkbox" style="display:inline;width:auto;min-height:auto;margin:0 0 0 8px" onchange="document.getElementById('reset-password').type=this.checked?'text':'password';document.getElementById('reset-confirm').type=this.checked?'text':'password'">إظهار كلمة المرور الجديدة</label>
+<button type="submit">تحديث كلمة المرور</button></form></section>{% endif %}
+<section class="panel"><a href="{{ url_for('user_payroll',user_id=x.id) }}">عرض كشف المستحقات</a></section>""", x=dict(row))
+
+
+@app.post("/users/<int:user_id>/edit")
+@require("admin")
+def save_user_details(user_id):
+    try:
+        active = request.form.get("active")
+        if active not in ("0", "1"):
+            raise ValueError("Invalid account status")
+        with db() as conn:
+            ops.update_user(conn, current_user()["id"], user_id,
+                            request.form.get("full_name", ""), request.form.get("phone", ""),
+                            request.form.get("username", ""), request.form.get("role", ""),
+                            active == "1")
+        flash("تم تحديث بيانات المستخدم")
+    except (ValueError, LookupError, PermissionError) as exc:
+        flash("تعذر تحديث المستخدم: " + str(exc))
+    return redirect(url_for("user_details", user_id=user_id))
+
+
+@app.post("/users/<int:user_id>/password")
+@require("admin")
+def change_user_password(user_id):
+    password = request.form.get("password", "")
+    if password != request.form.get("confirm", ""):
+        flash("كلمتا المرور غير متطابقتين")
+    else:
+        try:
+            with db() as conn:
+                ops.reset_user_password(conn, current_user()["id"], user_id, password)
+            flash("تم تغيير كلمة المرور بنجاح")
+        except (ValueError, LookupError, PermissionError) as exc:
+            flash("تعذر تغيير كلمة المرور: " + str(exc))
+    return redirect(url_for("user_details", user_id=user_id))
 
 
 @app.get("/source-statuses")
