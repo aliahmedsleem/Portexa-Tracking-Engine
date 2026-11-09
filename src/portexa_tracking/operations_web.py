@@ -7,6 +7,7 @@ import secrets
 from functools import wraps
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 from portexa_tracking import operations_shipment_edit as edit
+from portexa_tracking import operations_ports as ports
 from portexa_tracking.portexa_bridge import get_source_shipment
 from flask import Flask, abort, flash, redirect, render_template_string, request, session, url_for
 from markupsafe import escape
@@ -155,6 +156,7 @@ def home():
                     task["shipment"] = get_source_shipment(task["shipment_id"])
                     task["source_error"] = None
                     task["can_edit"] = False
+                    task["ports"] = ports.split_details(task["shipment"]["shipping_details"]) if task["shipment"] else None
                     if task["shipment"] and task["status"] in ("pending", "rejected"):
                         edit.authorized_task(conn, u["id"], task["id"])
                         task["can_edit"] = True
@@ -182,7 +184,11 @@ def home():
 <label>تاريخ الشحن<input type="date" name="ship_date" value="{{ t.shipment.ship_date or '' }}"></label>
 <label>تاريخ الوصول<input type="date" name="arrival_date" value="{{ t.shipment.arrival_date or '' }}"></label>
 </div>
-<label>تفاصيل الشحن<textarea name="shipping_details" maxlength="2000">{{ t.shipment.shipping_details or '' }}</textarea></label>
+<div class="grid">
+<label>ميناء الشحن<input name="loading_port" maxlength="120" value="{{ t.ports.loading_port }}"></label>
+<label>ميناء الوجهة<input name="destination_port" maxlength="120" value="{{ t.ports.destination_port }}"></label>
+</div>
+<label>تفاصيل الشحن<textarea name="shipping_details" maxlength="2000">{{ t.ports.details }}</textarea></label>
 <button type="submit">حفظ التعديلات في PORTEXA</button></form>
 {% else %}
 <div class="grid">
@@ -190,7 +196,8 @@ def home():
 <div>التتبع: {{ t.shipment.msc_tracking or '—' }}</div>
 <div>تاريخ الشحن: {{ t.shipment.ship_date or '—' }}</div>
 <div>تاريخ الوصول: {{ t.shipment.arrival_date or '—' }}</div></div>
-<p style="white-space:pre-wrap;overflow-wrap:anywhere">{{ t.shipment.shipping_details or 'لا توجد تفاصيل' }}</p>
+<p>ميناء الشحن: {{ t.ports.loading_port or 'غير مسجل' }} · ميناء الوجهة: {{ t.ports.destination_port or 'غير مسجل' }}</p>
+<p style="white-space:pre-wrap;overflow-wrap:anywhere">{{ t.ports.details or 'لا توجد تفاصيل' }}</p>
 {% endif %}
 {% else %}<p class="error">{{ t.source_error or 'الشحنة غير موجودة في المصدر' }}</p>{% endif %}
 {% if t.status in ('pending','rejected') %}
@@ -250,6 +257,16 @@ def save_shipment_edit(task_id):
         if not isinstance(signed, dict) or signed.get("task_id") != task_id:
             abort(403)
         values = {key:request.form.get(key, "") for key in edit.FIELDS}
+        original = ports.split_details(signed["values"]["shipping_details"])
+        raw_details = request.form.get("shipping_details", "")
+        loading = request.form.get("loading_port", "")
+        destination = request.form.get("destination_port", "")
+        if (raw_details == original["details"] and
+                loading.strip() == original["loading_port"] and
+                destination.strip() == original["destination_port"]):
+            values["shipping_details"] = signed["values"]["shipping_details"] or ""
+        else:
+            values["shipping_details"] = ports.combine_details(raw_details, loading, destination) or ""
         with db() as conn:
             result = edit.save_shipment(conn, current_user()["id"], task_id, values, signed["values"])
         flash("تم حفظ التحديث في PORTEXA" if result["changed"] else "لا توجد تغييرات للحفظ")
