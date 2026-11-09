@@ -67,6 +67,24 @@ def get_source_shipment(shipment_id):
         return dict(row) if row else None
 
 
+def normalize_shipment_date(value):
+    """Accept ISO dates or day-first dates from the staff UI; store ISO only."""
+    from datetime import datetime, date
+    if not value:
+        return None
+    if not isinstance(value, str):
+        raise ValueError("Invalid date value")
+    value = value.strip()
+    try:
+        return date.fromisoformat(value).isoformat()
+    except ValueError:
+        pass
+    try:
+        return datetime.strptime(value, "%d-%m-%Y").date().isoformat()
+    except ValueError as exc:
+        raise ValueError("Invalid shipment date (use YYYY-MM-DD or DD-MM-YYYY)") from exc
+
+
 def update_source_shipment(shipment_id, values, expected):
     if not isinstance(values, dict) or not values or set(values) - EDITABLE:
         raise ValueError("Only approved shipment fields may be updated")
@@ -78,12 +96,8 @@ def update_source_shipment(shipment_id, values, expected):
             raise ValueError("Field values must be strings or null")
         if value is not None and len(value) > (2000 if key == "shipping_details" else 300):
             raise ValueError("Field value too long: " + key)
-        if key in ("ship_date", "arrival_date") and value:
-            from datetime import date
-            try:
-                date.fromisoformat(value)
-            except ValueError as exc:
-                raise ValueError("Invalid ISO date for " + key) from exc
+        if key in ("ship_date", "arrival_date"):
+            value = normalize_shipment_date(value)
         if key == "bol_no" and value and not re.fullmatch(r"[\w./ -]{1,120}", value, re.UNICODE):
             raise ValueError("Invalid bill of lading reference")
         updates[key] = value or None
@@ -160,9 +174,8 @@ def save_shipment_bundle(shipment_id, values, expected, containers, expected_con
             raise ValueError("Field too long")
         if key == "bol_no" and value and not re.fullmatch(r"[\w./ -]{1,120}", value, re.UNICODE):
             raise ValueError("Invalid bill of lading")
-        if key in ("ship_date", "arrival_date") and value:
-            from datetime import date
-            date.fromisoformat(value)
+        if key in ("ship_date", "arrival_date"):
+            value = normalize_shipment_date(value)
         validated[key] = value
     cleaned = []
     seen = set()
