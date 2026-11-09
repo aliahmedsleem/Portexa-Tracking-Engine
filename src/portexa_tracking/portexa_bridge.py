@@ -199,7 +199,8 @@ def save_shipment_bundle(shipment_id, values, expected, containers, expected_con
                 raise ValueError("Movement field too long")
             if key in ("etd", "eta") and value:
                 try:
-                    value = datetime.fromisoformat(value.replace("Z", "+00:00")).isoformat()
+                    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                    value = parsed.date().isoformat() if "T" not in value and " " not in value else parsed.isoformat()
                 except ValueError:
                     value = normalize_shipment_date(value)
             row[key] = value or None
