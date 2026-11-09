@@ -125,6 +125,48 @@ def create_user(conn, actor, full_name, phone, username, password, role="operato
         return cur.lastrowid
 
 
+def update_user(conn, actor, user_id, full_name, phone, username, role, active):
+    """Admin-only account edit; protect the last active admin."""
+    _require(conn, actor, ("admin",))
+    if (not all(isinstance(x, str) for x in (full_name, phone, username))
+            or not all((full_name.strip(), phone.strip(), username.strip()))
+            or any(len(x.strip()) > n for x, n in ((full_name, 120), (phone, 40), (username, 80)))
+            or role not in ROLES or type(active) is not bool):
+        raise ValueError("Invalid user details")
+    with conn:
+        target = conn.execute("SELECT id,role,active FROM ops_users WHERE id=?", (user_id,)).fetchone()
+        if target is None:
+            raise LookupError("User not found")
+        if target["role"] == "admin" and target["active"] and (role != "admin" or not active):
+            remaining = conn.execute(
+                "SELECT COUNT(*) FROM ops_users WHERE role='admin' AND active=1"
+            ).fetchone()[0]
+            if remaining <= 1:
+                raise ValueError("Cannot deactivate or demote the last active admin")
+        if user_id == actor and not active:
+            raise ValueError("Cannot deactivate your own account")
+        try:
+            conn.execute(
+                "UPDATE ops_users SET full_name=?,phone=?,username=?,role=?,active=? WHERE id=?",
+                (full_name.strip(), phone.strip(), username.strip(), role, int(active), user_id)
+            )
+        except sqlite3.IntegrityError as exc:
+            raise ValueError("Username already exists") from exc
+        audit(conn, actor, "user.updated", "user", user_id,
+              "role=" + role + ";active=" + str(int(active)))
+
+
+def reset_user_password(conn, actor, user_id, new_password):
+    """Replace password hash; never retrieve or audit plaintext passwords."""
+    _require(conn, actor, ("admin",))
+    password_hash = hash_password(new_password)
+    with conn:
+        if conn.execute("SELECT id FROM ops_users WHERE id=?", (user_id,)).fetchone() is None:
+            raise LookupError("User not found")
+        conn.execute("UPDATE ops_users SET password_hash=? WHERE id=?", (password_hash, user_id))
+        audit(conn, actor, "user.password.reset", "user", user_id)
+
+
 def authenticate(conn, username, password):
     row = conn.execute("SELECT * FROM ops_users WHERE username=? AND active=1", (username,)).fetchone()
     return dict(row) if row and verify_password(password, row["password_hash"]) else None
