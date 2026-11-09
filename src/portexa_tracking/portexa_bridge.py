@@ -186,6 +186,8 @@ def save_shipment_bundle(shipment_id, values, expected, containers, expected_con
         )] if has_table else []
         if existing != expected_containers:
             raise RuntimeError("Container movements changed; reload before saving")
+        if existing and not cleaned:
+            raise ValueError("Removing every container is blocked; retain at least one container")
         changed = any(validated[k] != current[k] for k in EDITABLE) or cleaned != existing
         if not changed:
             return False
