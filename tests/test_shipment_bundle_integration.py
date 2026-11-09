@@ -106,3 +106,16 @@ def test_invalid_day_first_date_does_not_modify_source(source_db):
         bridge.save_shipment_bundle(1, values, original(), items, [])
     with sqlite3.connect(source_db) as conn:
         assert conn.execute("SELECT bol_no FROM shipment").fetchone()[0] == "BOL1"
+
+
+def test_shipment_only_save_preserves_declared_container_count(source_db):
+    values = payload()
+    values["ship_date"] = "09-08-2026"
+    assert bridge.save_shipment_bundle(1, values, original(), [], []) is True
+    with sqlite3.connect(source_db) as conn:
+        assert conn.execute(
+            "SELECT bol_no,ship_date,containers_count FROM shipment WHERE id=1"
+        ).fetchone() == ("BOL2", "2026-08-09", 2)
+        assert conn.execute(
+            "SELECT COUNT(*) FROM ops_container_movements WHERE shipment_id=1"
+        ).fetchone()[0] == 0
