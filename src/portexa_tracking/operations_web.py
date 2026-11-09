@@ -202,7 +202,7 @@ def home():
 <input type="hidden" name="route_snapshot" value="{{ t.route_snapshot }}">
 <div class="grid">
 {% for key,label in route_labels %}
-<label>{{ label }}<input name="{{ key }}" maxlength="{{ 1500 if key=='operator_notes' else 200 }}" value="{{ t.route[key] if t.route and t.route[key] else '' }}"></label>
+<label>{{ label }}<input type="{{ 'datetime-local' if key in ('etd','eta') else 'text' }}" name="{{ key }}" {% if key in ('etd','eta') %}step="60"{% else %}maxlength="{{ 1500 if key=='operator_notes' else 200 }}"{% endif %} value="{{ (t.route[key][:16].replace(' ', 'T') if t.route and t.route[key] and key in ('etd','eta') and t.route[key]|length > 10 else t.route[key]) if t.route and t.route[key] else '' }}"></label>
 {% endfor %}
 </div><button type="submit">حفظ مسار الشحنة والموانئ</button></form>
 {% else %}
