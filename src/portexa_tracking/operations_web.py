@@ -175,8 +175,28 @@ def home():
                 except (OSError, ValueError, RuntimeError, PermissionError) as exc:
                     task["shipment"] = None
                     task["source_error"] = "تعذر قراءة بيانات الشحنة"
+            bol_filter = request.args.get("bol_filter", "all")
+            if bol_filter not in ("all", "with", "without"):
+                bol_filter = "all"
+            all_count = len(tasks)
+            with_bol = sum(1 for t in tasks if t.get("shipment") and (t["shipment"].get("bol_no") or "").strip())
+            without_bol = sum(1 for t in tasks if t.get("shipment") and not (t["shipment"].get("bol_no") or "").strip())
+            if bol_filter == "with":
+                tasks = [t for t in tasks if t.get("shipment") and (t["shipment"].get("bol_no") or "").strip()]
+            elif bol_filter == "without":
+                tasks = [t for t in tasks if t.get("shipment") and not (t["shipment"].get("bol_no") or "").strip()]
             return page("""<section class="panel"><h2>البوالص المسندة إليّ</h2>
-<p>عدد المهام: {{ tasks|length }}</p>
+<form method="get" action="{{ url_for('home') }}">
+<label>فلترة الشحنات حسب رقم بوليصة الشحن
+<select name="bol_filter" onchange="this.form.submit()">
+<option value="all" {% if bol_filter == 'all' %}selected{% endif %}>جميع الشحنات ({{ all_count }})</option>
+<option value="with" {% if bol_filter == 'with' %}selected{% endif %}>تحتوي على بوليصة ({{ with_bol }})</option>
+<option value="without" {% if bol_filter == 'without' %}selected{% endif %}>بدون بوليصة ({{ without_bol }})</option>
+</select></label>
+<noscript><button type="submit">تطبيق الفلتر</button></noscript>
+</form>
+<p>عدد المهام المعروضة: {{ tasks|length }}</p>
+<p class="muted">الشحنات التي تعذرت قراءتها لا تُحسب ضمن فلتر وجود البوليصة.</p>
 <p class="muted">التعديل يحفظ بيانات الشحنة مباشرة عند تفعيل الكتابة، واعتماد المراجعة والأجر إجراء منفصل.</p></section>
 {% for t in tasks %}<section class="panel"><h3>شحنة #{{ t.shipment_id }}</h3>
 <p>الدورة: {{ t.cycle_at }} · الحالة: {{ t.status }} · الأجر: {{ t.price_iqd }} د.ع</p>
@@ -224,7 +244,7 @@ def home():
 <option value="0">تم التحقق — لا يوجد تغيير</option>
 <option value="1">تم تحديث بيانات الشحنة</option></select></label>
 <button>إرسال للمراجعة</button></form>{% endif %}</section>
-{% else %}<section class="panel">لا توجد مهام حالياً</section>{% endfor %}""",tasks=tasks,route_labels=ROUTE_LABELS)
+{% else %}<section class="panel">لا توجد مهام حالياً</section>{% endfor %}""",tasks=tasks,route_labels=ROUTE_LABELS,bol_filter=bol_filter,all_count=all_count,with_bol=with_bol,without_bol=without_bol)
         stats = ops.dashboard_stats(conn, u["id"])
         users = [dict(r) for r in conn.execute("SELECT id,full_name,phone,username,role,active FROM ops_users ORDER BY id")]
         assignments = dist.assignment_history(conn)
