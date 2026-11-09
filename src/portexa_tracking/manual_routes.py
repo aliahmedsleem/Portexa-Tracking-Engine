@@ -40,8 +40,10 @@ def get_routes(ids):
 
 
 def save_route(shipment_id, values, expected_updated_at):
-    from portexa_tracking.portexa_bridge import get_source_shipment
-    if get_source_shipment(shipment_id) is None:
+    from portexa_tracking.portexa_bridge import source_connection
+    with source_connection() as source:
+        exists = source.execute("SELECT 1 FROM shipment WHERE id=?", (int(shipment_id),)).fetchone()
+    if exists is None:
         raise LookupError("PORTEXA shipment not found")
     if not isinstance(values, dict) or set(values) != set(FIELDS):
         raise ValueError("All manual route fields are required in request")
