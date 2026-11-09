@@ -7,7 +7,7 @@ import secrets
 from functools import wraps
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 from portexa_tracking import operations_shipment_edit as edit
-from portexa_tracking import operations_ports as ports
+from portexa_tracking import manual_routes as routes
 from portexa_tracking.portexa_bridge import get_source_shipment
 from flask import Flask, abort, flash, redirect, render_template_string, request, session, url_for
 from markupsafe import escape
@@ -74,6 +74,16 @@ def current_user():
     with db() as conn:
         row = conn.execute("SELECT id,full_name,role,active FROM ops_users WHERE id=?", (uid,)).fetchone()
         return dict(row) if row and row["active"] else None
+
+
+ROUTE_LABELS = (
+    ("loading_port","ميناء الشحن"),("current_port","الميناء الحالي"),
+    ("next_port","الميناء القادم"),("discharge_port","ميناء الوجهة / التفريغ"),
+    ("transshipment_port","ميناء الترانزيت"),("vessel_name","اسم السفينة"),
+    ("voyage_number","رقم الرحلة"),("container_number","رقم الحاوية"),
+    ("etd","موعد المغادرة المتوقع (ISO)"),("eta","موعد الوصول المتوقع (ISO)"),
+    ("current_status","حالة المسار"),("operator_notes","ملاحظات الموظف")
+)
 
 
 def snapshot_signer():
@@ -156,11 +166,12 @@ def home():
                     task["shipment"] = get_source_shipment(task["shipment_id"])
                     task["source_error"] = None
                     task["can_edit"] = False
-                    task["ports"] = ports.split_details(task["shipment"]["shipping_details"]) if task["shipment"] else None
+                    task["route"] = routes.get_routes([task["shipment_id"]]).get(task["shipment_id"]) if task["shipment"] else None
                     if task["shipment"] and task["status"] in ("pending", "rejected"):
                         edit.authorized_task(conn, u["id"], task["id"])
                         task["can_edit"] = True
                         task["snapshot"] = snapshot_token(task["id"], task["shipment"])
+                        task["route_snapshot"] = snapshot_signer().dumps({"task_id":task["id"],"updated_at":task["route"]["updated_at"] if task["route"] else None})
                 except (OSError, ValueError, RuntimeError, PermissionError) as exc:
                     task["shipment"] = None
                     task["source_error"] = "تعذر قراءة بيانات الشحنة"
@@ -184,20 +195,24 @@ def home():
 <label>تاريخ الشحن<input type="date" name="ship_date" value="{{ t.shipment.ship_date or '' }}"></label>
 <label>تاريخ الوصول<input type="date" name="arrival_date" value="{{ t.shipment.arrival_date or '' }}"></label>
 </div>
+<label>تفاصيل الشحن<textarea name="shipping_details" maxlength="2000">{{ t.shipment.shipping_details or '' }}</textarea></label>
+<button type="submit">حفظ بيانات الشحنة في PORTEXA</button></form>
+<form method="post" action="{{ url_for('save_shipment_route',task_id=t.id) }}">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<input type="hidden" name="route_snapshot" value="{{ t.route_snapshot }}">
 <div class="grid">
-<label>ميناء الشحن<input name="loading_port" maxlength="120" value="{{ t.ports.loading_port }}"></label>
-<label>ميناء الوجهة<input name="destination_port" maxlength="120" value="{{ t.ports.destination_port }}"></label>
-</div>
-<label>تفاصيل الشحن<textarea name="shipping_details" maxlength="2000">{{ t.ports.details }}</textarea></label>
-<button type="submit">حفظ التعديلات في PORTEXA</button></form>
+{% for key,label in route_labels %}
+<label>{{ label }}<input name="{{ key }}" maxlength="{{ 1500 if key=='operator_notes' else 200 }}" value="{{ t.route[key] if t.route and t.route[key] else '' }}"></label>
+{% endfor %}
+</div><button type="submit">حفظ مسار الشحنة والموانئ</button></form>
 {% else %}
 <div class="grid">
 <div>البوليصة: {{ t.shipment.bol_no or '—' }}</div>
 <div>التتبع: {{ t.shipment.msc_tracking or '—' }}</div>
 <div>تاريخ الشحن: {{ t.shipment.ship_date or '—' }}</div>
 <div>تاريخ الوصول: {{ t.shipment.arrival_date or '—' }}</div></div>
-<p>ميناء الشحن: {{ t.ports.loading_port or 'غير مسجل' }} · ميناء الوجهة: {{ t.ports.destination_port or 'غير مسجل' }}</p>
-<p style="white-space:pre-wrap;overflow-wrap:anywhere">{{ t.ports.details or 'لا توجد تفاصيل' }}</p>
+<p>ميناء الشحن: {{ t.route.loading_port if t.route and t.route.loading_port else 'غير مسجل' }} · ميناء الوجهة: {{ t.route.discharge_port if t.route and t.route.discharge_port else 'غير مسجل' }}</p>
+<p style="white-space:pre-wrap;overflow-wrap:anywhere">{{ t.shipment.shipping_details or 'لا توجد تفاصيل' }}</p>
 {% endif %}
 {% else %}<p class="error">{{ t.source_error or 'الشحنة غير موجودة في المصدر' }}</p>{% endif %}
 {% if t.status in ('pending','rejected') %}
@@ -209,7 +224,7 @@ def home():
 <option value="0">تم التحقق — لا يوجد تغيير</option>
 <option value="1">تم تحديث بيانات الشحنة</option></select></label>
 <button>إرسال للمراجعة</button></form>{% endif %}</section>
-{% else %}<section class="panel">لا توجد مهام حالياً</section>{% endfor %}""",tasks=tasks)
+{% else %}<section class="panel">لا توجد مهام حالياً</section>{% endfor %}""",tasks=tasks,route_labels=ROUTE_LABELS)
         stats = ops.dashboard_stats(conn, u["id"])
         users = [dict(r) for r in conn.execute("SELECT id,full_name,phone,username,role,active FROM ops_users ORDER BY id")]
         assignments = dist.assignment_history(conn)
@@ -249,6 +264,28 @@ def home():
 <label>العنوان<input name="title" required></label><label>الرسالة<textarea name="body" required></textarea></label><button>إرسال</button></form></section>""", stats=stats, users=users, pending=pending, assignments=assignments)
 
 
+@app.post("/tasks/<int:task_id>/route/save")
+@require("operator")
+def save_shipment_route(task_id):
+    try:
+        signed = snapshot_signer().loads(request.form.get("route_snapshot", ""), max_age=3600)
+        if not isinstance(signed, dict) or signed.get("task_id") != task_id:
+            abort(403)
+        with db() as conn:
+            task = edit.authorized_task(conn, current_user()["id"], task_id)
+            values = {key:request.form.get(key, "") for key in routes.FIELDS}
+            saved = routes.save_route(task["shipment_id"], values, signed.get("updated_at"))
+            with conn:
+                ops.audit(conn, current_user()["id"], "shipment.route.updated", "shipment",
+                          task["shipment_id"], "updated_at="+saved["updated_at"])
+        flash("تم حفظ الموانئ ومسار الشحنة")
+    except (BadSignature, SignatureExpired, KeyError, TypeError):
+        flash("انتهت صلاحية النموذج؛ حدّث الصفحة")
+    except (ValueError, LookupError, PermissionError, RuntimeError, OSError) as exc:
+        flash("تعذر حفظ المسار: " + str(exc))
+    return redirect(url_for("home"))
+
+
 @app.post("/tasks/<int:task_id>/shipment/save")
 @require("operator")
 def save_shipment_edit(task_id):
@@ -257,16 +294,7 @@ def save_shipment_edit(task_id):
         if not isinstance(signed, dict) or signed.get("task_id") != task_id:
             abort(403)
         values = {key:request.form.get(key, "") for key in edit.FIELDS}
-        original = ports.split_details(signed["values"]["shipping_details"])
-        raw_details = request.form.get("shipping_details", "")
-        loading = request.form.get("loading_port", "")
-        destination = request.form.get("destination_port", "")
-        if (raw_details == original["details"] and
-                loading.strip() == original["loading_port"] and
-                destination.strip() == original["destination_port"]):
-            values["shipping_details"] = signed["values"]["shipping_details"] or ""
-        else:
-            values["shipping_details"] = ports.combine_details(raw_details, loading, destination) or ""
+
         with db() as conn:
             result = edit.save_shipment(conn, current_user()["id"], task_id, values, signed["values"])
         flash("تم حفظ التحديث في PORTEXA" if result["changed"] else "لا توجد تغييرات للحفظ")
