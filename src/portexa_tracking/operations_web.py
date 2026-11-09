@@ -146,9 +146,28 @@ ROUTE_LABELS = (
     ("next_port","الميناء القادم"),("discharge_port","ميناء الوجهة / التفريغ"),
     ("transshipment_port","ميناء الترانزيت"),("vessel_name","اسم السفينة"),
     ("voyage_number","رقم الرحلة"),("container_number","رقم الحاوية"),
-    ("etd","موعد المغادرة المتوقع (ISO)"),("eta","موعد الوصول المتوقع (ISO)"),
+    ("etd","تاريخ المغادرة المتوقع"),("eta","تاريخ الوصول المتوقع"),
     ("current_status","حالة المسار"),("operator_notes","ملاحظات الموظف")
 )
+
+
+def date_input_value(value):
+    """Normalize legacy display values for native HTML date pickers."""
+    from datetime import datetime, date
+    if not value:
+        return ""
+    raw = str(value).strip()
+    try:
+        return date.fromisoformat(raw[:10]).isoformat()
+    except ValueError:
+        pass
+    try:
+        return datetime.strptime(raw, "%d-%m-%Y").date().isoformat()
+    except ValueError:
+        return ""
+
+
+app.add_template_filter(date_input_value, "date_input_value")
 
 
 def snapshot_signer():
@@ -278,17 +297,17 @@ def home():
 <h3>معلومات الشحنة</h3><div class="grid">
 <label>رقم البوليصة<input name="bol_no" maxlength="120" value="{{ t.shipment.bol_no or '' }}"></label>
 <label>رقم التتبع<input name="msc_tracking" maxlength="300" value="{{ t.shipment.msc_tracking or '' }}"></label>
-<label>تاريخ الشحن<input type="date" name="ship_date" value="{{ t.shipment.ship_date or '' }}"></label>
-<label>تاريخ الوصول<input type="date" name="arrival_date" value="{{ t.shipment.arrival_date or '' }}"></label></div>
+<label>تاريخ الشحن<input type="date" name="ship_date" value="{{ t.shipment.ship_date|date_input_value }}"></label>
+<label>تاريخ الوصول<input type="date" name="arrival_date" value="{{ t.shipment.arrival_date|date_input_value }}"></label></div>
 <label>تفاصيل الشحن<textarea name="shipping_details" maxlength="2000">{{ t.shipment.shipping_details or '' }}</textarea></label>
 <h3>الحاويات وحركة النقل</h3><p class="muted">البوليصة تجمع الحاويات ولا تفرض مساراً موحداً. للحاوية الواحدة حدّث سجلها فقط؛ ولعدة حاويات أدخل حركة كل واحدة مستقلة، أو انسخ حركة الأولى للبقية فقط إذا تأكدت أنها تتحرك معاً. النسخ لا يغيّر أرقام الحاويات.</p><div class="container-list">
 {% for c in t.containers %}<fieldset class="container-item"><legend>حاوية {{ loop.index }}</legend>
 <div class="grid"><label>رقم الحاوية<input name="container_number" value="{{ c.container_number }}" required maxlength="30"></label>
-{% for key,label in movement_labels %}<label>{{ label }}<input name="move_{{ key }}" value="{{ c[key] or '' }}" maxlength="{{ 1500 if key=='operator_notes' else 200 }}"></label>{% endfor %}
+{% for key,label in movement_labels %}<label>{{ label }}<input {% if key in ('etd','eta') %}type="date" value="{{ c[key]|date_input_value }}"{% else %}type="text" value="{{ c[key] or '' }}" maxlength="{{ 1500 if key=='operator_notes' else 200 }}"{% endif %} name="move_{{ key }}"></label>{% endfor %}
 </div><button type="button" class="remove-container">حذف الحاوية</button></fieldset>{% endfor %}</div>
 <template class="container-template"><fieldset class="container-item"><legend>حاوية جديدة</legend><div class="grid">
 <label>رقم الحاوية<input name="container_number" maxlength="30" required></label>
-{% for key,label in movement_labels %}<label>{{ label }}<input name="move_{{ key }}" maxlength="{{ 1500 if key=='operator_notes' else 200 }}"></label>{% endfor %}
+{% for key,label in movement_labels %}<label>{{ label }}<input {% if key in ('etd','eta') %}type="date"{% else %}type="text" maxlength="{{ 1500 if key=='operator_notes' else 200 }}"{% endif %} name="move_{{ key }}"></label>{% endfor %}
 </div><button type="button" class="remove-container">حذف الحاوية</button></fieldset></template>
 <div class="bundle-actions"><button type="button" class="add-container">+ إضافة حاوية</button><button type="button" class="copy-movement">تحديث جماعي: نسخ حركة الأولى للبقية</button></div>
 <button type="submit" class="bundle-save">حفظ جميع التحديثات في PORTEXA</button></form>
