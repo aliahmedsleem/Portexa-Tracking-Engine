@@ -198,7 +198,10 @@ def save_shipment_bundle(shipment_id, values, expected, containers, expected_con
             if len(value) > (1500 if key == "operator_notes" else 200):
                 raise ValueError("Movement field too long")
             if key in ("etd", "eta") and value:
-                datetime.fromisoformat(value.replace("Z", "+00:00"))
+                try:
+                    value = datetime.fromisoformat(value.replace("Z", "+00:00")).isoformat()
+                except ValueError:
+                    value = normalize_shipment_date(value)
             row[key] = value or None
         cleaned.append(row)
     with source_connection(write=True) as conn:
