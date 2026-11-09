@@ -201,7 +201,16 @@ def save_shipment_bundle(shipment_id, values, expected, containers, expected_con
                      ",".join(k + " TEXT" for k in MOVEMENT_FIELDS) +
                      ", UNIQUE(shipment_id,container_number))")
         cols = ("container_number",) + MOVEMENT_FIELDS
-        # Synchronize container count only when explicit container records are supplied.\n        count_update = ",containers_count=?" if cleaned else ""\n        params = [validated[k] for k in EDITABLE]\n        if cleaned:\n            params.append(len(cleaned))\n        conn.execute("UPDATE shipment SET " + ",".join(k + "=?" for k in EDITABLE) + count_update +\n                     " WHERE id=?", (*params, int(shipment_id)))
+        # Keep the source shipment container count aligned with saved records.
+        count_update = ",containers_count=?" if cleaned else ""
+        params = [validated[k] for k in EDITABLE]
+        if cleaned:
+            params.append(len(cleaned))
+        conn.execute(
+            "UPDATE shipment SET " + ",".join(k + "=?" for k in EDITABLE)
+            + count_update + " WHERE id=?",
+            (*params, int(shipment_id)),
+        )
         conn.execute("DELETE FROM ops_container_movements WHERE shipment_id=?", (int(shipment_id),))
         for item in cleaned:
             conn.execute("INSERT INTO ops_container_movements(shipment_id," + ",".join(cols) +
