@@ -124,7 +124,7 @@ BASE = """<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><
 <main>{% for msg in get_flashed_messages() %}<p class="panel flash" role="status">{{ msg }}</p>{% endfor %}{{ body|safe }}</main>
 </div></div>
 {% endif %}
-<script>document.addEventListener('click',function(e){const add=e.target.closest('.add-container'),remove=e.target.closest('.remove-container'),copy=e.target.closest('.copy-movement');if(!add&&!remove&&!copy)return;const form=e.target.closest('.shipment-bundle');if(!form)return;const list=form.querySelector('.container-list');if(add){list.append(form.querySelector('.container-template').content.cloneNode(true));return;}if(remove){remove.closest('.container-item').remove();return;}if(copy){const items=[...list.querySelectorAll('.container-item')];if(items.length<2)return;for(const item of items.slice(1)){for(const source of items[0].querySelectorAll('[name^="move_"]')){const dest=item.querySelector('[name="'+source.name+'"]');if(dest)dest.value=source.value;}}}});</script></body></html>"""
+<script>document.addEventListener('click',function(e){const add=e.target.closest('.add-container'),remove=e.target.closest('.remove-container'),copy=e.target.closest('.copy-movement');if(!add&&!remove&&!copy)return;const form=e.target.closest('.shipment-bundle');if(!form)return;const list=form.querySelector('.container-list');if(add){list.append(form.querySelector('.container-template').content.cloneNode(true));return;}if(remove){remove.closest('.container-item').remove();return;}if(copy){const items=[...list.querySelectorAll('.container-item')];if(items.length<2)return;if(!window.confirm('هل تأكدت أن جميع الحاويات في هذه البوليصة تتحرك معاً؟ سيتم استبدال حقول الحركة للحاويات الأخرى بحركة الحاوية الأولى، دون تغيير أرقامها.'))return;for(const item of items.slice(1)){for(const source of items[0].querySelectorAll('[name^="move_"]')){const dest=item.querySelector('[name="'+source.name+'"]');if(dest)dest.value=source.value;}}}});</script></body></html>"""
 
 def db():
     conn = connect()
@@ -280,7 +280,7 @@ def home():
 <label>تاريخ الشحن<input type="date" name="ship_date" value="{{ t.shipment.ship_date or '' }}"></label>
 <label>تاريخ الوصول<input type="date" name="arrival_date" value="{{ t.shipment.arrival_date or '' }}"></label></div>
 <label>تفاصيل الشحن<textarea name="shipping_details" maxlength="2000">{{ t.shipment.shipping_details or '' }}</textarea></label>
-<h3>الحاويات وحركة النقل</h3><p class="muted">تُحفظ حركة كل حاوية بصورة مستقلة. لا تستخدم نسخ الحركة إلا إذا تحركت جميع الحاويات معاً.</p><div class="container-list">
+<h3>الحاويات وحركة النقل</h3><p class="muted">البوليصة تجمع الحاويات ولا تفرض مساراً موحداً. للحاوية الواحدة حدّث سجلها فقط؛ ولعدة حاويات أدخل حركة كل واحدة مستقلة، أو انسخ حركة الأولى للبقية فقط إذا تأكدت أنها تتحرك معاً. النسخ لا يغيّر أرقام الحاويات.</p><div class="container-list">
 {% for c in t.containers %}<fieldset class="container-item"><legend>حاوية {{ loop.index }}</legend>
 <div class="grid"><label>رقم الحاوية<input name="container_number" value="{{ c.container_number }}" required maxlength="30"></label>
 {% for key,label in movement_labels %}<label>{{ label }}<input name="move_{{ key }}" value="{{ c[key] or '' }}" maxlength="{{ 1500 if key=='operator_notes' else 200 }}"></label>{% endfor %}
@@ -289,7 +289,7 @@ def home():
 <label>رقم الحاوية<input name="container_number" maxlength="30" required></label>
 {% for key,label in movement_labels %}<label>{{ label }}<input name="move_{{ key }}" maxlength="{{ 1500 if key=='operator_notes' else 200 }}"></label>{% endfor %}
 </div><button type="button" class="remove-container">حذف الحاوية</button></fieldset></template>
-<div class="bundle-actions"><button type="button" class="add-container">+ إضافة حاوية</button><button type="button" class="copy-movement">نسخ حركة الأولى إلى جميع الحاويات</button></div>
+<div class="bundle-actions"><button type="button" class="add-container">+ إضافة حاوية</button><button type="button" class="copy-movement">تحديث جماعي: نسخ حركة الأولى للبقية</button></div>
 <button type="submit" class="bundle-save">حفظ جميع التحديثات في PORTEXA</button></form>
 {% else %}
 <div class="grid">
