@@ -105,6 +105,7 @@ def update_source_shipment(shipment_id, values, expected):
 
 # Unified shipment and container movements are stored in the PORTEXA source DB.
 # This path is explicitly gated and is never used by read-only tracking jobs.
+SHIPMENT_STATUSES = ("NEW", "IN_TRANSIT", "RECEIVED")
 MOVEMENT_FIELDS = ("loading_port", "current_port", "next_port", "discharge_port",
                    "transshipment_port", "vessel_name", "voyage_number", "etd", "eta",
                    "current_status", "operator_notes")
@@ -197,8 +198,7 @@ def save_shipment_bundle(shipment_id, values, expected, containers, expected_con
                      ",".join(k + " TEXT" for k in MOVEMENT_FIELDS) +
                      ", UNIQUE(shipment_id,container_number))")
         cols = ("container_number",) + MOVEMENT_FIELDS
-        conn.execute("UPDATE shipment SET " + ",".join(k + "=?" for k in EDITABLE) +
-                     " WHERE id=?", (*[validated[k] for k in EDITABLE], int(shipment_id)))
+        # Synchronize container count only when explicit container records are supplied.\n        count_update = ",containers_count=?" if cleaned else ""\n        params = [validated[k] for k in EDITABLE]\n        if cleaned:\n            params.append(len(cleaned))\n        conn.execute("UPDATE shipment SET " + ",".join(k + "=?" for k in EDITABLE) + count_update +\n                     " WHERE id=?", (*params, int(shipment_id)))
         conn.execute("DELETE FROM ops_container_movements WHERE shipment_id=?", (int(shipment_id),))
         for item in cleaned:
             conn.execute("INSERT INTO ops_container_movements(shipment_id," + ",".join(cols) +
