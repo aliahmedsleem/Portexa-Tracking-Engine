@@ -58,7 +58,6 @@ def save_route(shipment_id, values, expected_updated_at):
         if value and len(value) > (1500 if key == "operator_notes" else 200):
             raise ValueError("Field too long: " + key)
         if key in DATE_FIELDS and value:
-            from datetime import datetime
             try:
                 datetime.fromisoformat(value.replace("Z", "+00:00"))
             except ValueError as exc:
