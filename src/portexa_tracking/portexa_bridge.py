@@ -5,6 +5,7 @@ Read-only mode uses SQLite URI mode=ro. Writes use a single guarded transaction
 with an optimistic concurrency check, and only an approved subset of fields.
 """
 import os
+import json
 import re
 import sqlite3
 from pathlib import Path
@@ -123,7 +124,23 @@ def read_container_movements(shipment_id):
         )]
 
 
-def save_shipment_bundle(shipment_id, values, expected, containers, expected_containers):
+def read_container_history(shipment_id, limit=100):
+    """Read movement events without changing source tables."""
+    limit = min(max(int(limit), 1), 500)
+    with source_connection() as conn:
+        exists = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='ops_container_movement_history'"
+        ).fetchone()
+        if not exists:
+            return []
+        return [dict(row) for row in conn.execute(
+            "SELECT * FROM ops_container_movement_history "
+            "WHERE shipment_id=? ORDER BY id DESC LIMIT ?",
+            (int(shipment_id), limit),
+        )]
+
+
+def save_shipment_bundle(shipment_id, values, expected, containers, expected_containers, actor_id=None):
     """One SQLite transaction for shipment fields and all container movements."""
     from datetime import datetime
     if not isinstance(values, dict) or set(values) != EDITABLE:
@@ -211,6 +228,31 @@ def save_shipment_bundle(shipment_id, values, expected, containers, expected_con
             + count_update + " WHERE id=?",
             (*params, int(shipment_id)),
         )
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS ops_container_movement_history ("
+            "id INTEGER PRIMARY KEY, shipment_id INTEGER NOT NULL, "
+            "container_number TEXT NOT NULL, action TEXT NOT NULL, "
+            "previous_state TEXT, new_state TEXT, actor_id INTEGER, "
+            "recorded_at TEXT NOT NULL)"
+        )
+        before = {row["container_number"]: row for row in existing}
+        after = {row["container_number"]: row for row in cleaned}
+        from datetime import timezone
+        timestamp = datetime.now(timezone.utc).isoformat(timespec="microseconds")
+        for number in sorted(set(before) | set(after)):
+            old, new = before.get(number), after.get(number)
+            if old == new:
+                continue
+            action = "created" if old is None else "removed" if new is None else "updated"
+            conn.execute(
+                "INSERT INTO ops_container_movement_history("
+                "shipment_id,container_number,action,previous_state,new_state,actor_id,recorded_at"
+                ") VALUES(?,?,?,?,?,?,?)",
+                (int(shipment_id), number, action,
+                 json.dumps(old, ensure_ascii=False) if old is not None else None,
+                 json.dumps(new, ensure_ascii=False) if new is not None else None,
+                 int(actor_id) if actor_id is not None else None, timestamp),
+            )
         conn.execute("DELETE FROM ops_container_movements WHERE shipment_id=?", (int(shipment_id),))
         for item in cleaned:
             conn.execute("INSERT INTO ops_container_movements(shipment_id," + ",".join(cols) +
