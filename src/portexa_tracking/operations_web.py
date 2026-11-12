@@ -15,6 +15,7 @@ from markupsafe import escape
 from portexa_tracking.database import connect
 from portexa_tracking import operations as ops
 from portexa_tracking import operations_distribution as dist
+from portexa_tracking import operations_assignment_admin as assignment_admin
 from portexa_tracking.operations_scheduler import preview as cycle_preview
 
 app = Flask(__name__)
@@ -102,7 +103,8 @@ BASE = """<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><
   <div class="brand"><span class="brand-mark">P</span><div><strong>PORTEXA</strong><small>OPERATIONS CENTER</small></div></div>
   <div><div class="side-label">مساحة العمل</div><nav class="side-nav" aria-label="التنقل">
     <a href="{{ url_for('home') }}" class="{{ 'active' if request.path == url_for('home') else '' }}"><span class="nav-symbol" aria-hidden="true">▦</span>{{ 'مهامي وشحناتي' if user.role == 'operator' else 'لوحة التحكم' }}</a>
-    {% if user.role in ('admin','supervisor') %}<a href="{{ url_for('users_page') }}" class="{{ 'active' if request.path.startswith('/users') else '' }}"><span class="nav-symbol" aria-hidden="true">♙</span>إدارة المستخدمين</a>{% endif %}\n    <a href="{{ url_for('notifications') }}" class="{{ 'active' if request.path == url_for('notifications') else '' }}"><span class="nav-symbol" aria-hidden="true">◉</span>الإشعارات</a>
+    {% if user.role in ('admin','supervisor') %}<a href="{{ url_for('users_page') }}" class="{{ 'active' if request.path.startswith('/users') else '' }}"><span class="nav-symbol" aria-hidden="true">♙</span>إدارة المستخدمين</a>{% endif %}\n    {% if user.role in ('admin','supervisor') %}<a href="{{ url_for('assignment_management') }}" class="{{ 'active' if request.path.startswith('/assignments/manage') else '' }}"><span class="nav-symbol">▤</span>إدارة الإسنادات</a>{% endif %}
+    <a href="{{ url_for('notifications') }}" class="{{ 'active' if request.path == url_for('notifications') else '' }}"><span class="nav-symbol" aria-hidden="true">◉</span>الإشعارات</a>
     {% if user.role in ('admin','supervisor') %}
     <a href="{{ url_for('distribution_preview_page') }}" class="{{ 'active' if request.path == url_for('distribution_preview_page') else '' }}"><span class="nav-symbol" aria-hidden="true">⇄</span>معاينة التوزيع</a>
     <a href="{{ url_for('source_statuses_page') }}" class="{{ 'active' if request.path == url_for('source_statuses_page') else '' }}"><span class="nav-symbol" aria-hidden="true">≋</span>حالات الشحنات</a>
@@ -650,6 +652,51 @@ def shipment_history(shipment_id):
 {% else %}<tr><td colspan="6">لا توجد مراجعات بعد</td></tr>{% endfor %}</table></div></section>""",
 shipment_id=shipment_id,owner=owner["full_name"],rows=rows)
 
+
+
+@app.get("/assignments/manage")
+@require("admin","supervisor")
+def assignment_management():
+    with db() as conn:
+        valid, invalid = assignment_admin.inventory(conn)
+        users = [dict(r) for r in conn.execute(
+            "SELECT id,full_name FROM ops_users WHERE role='operator' AND active=1 ORDER BY full_name")]
+    return page("""<section class="panel"><h2>إدارة إسنادات البوالص</h2>
+<p class="muted">البيانات تقرأ مباشرة من Portexa. حذف الإسناد يعطله داخل Operations فقط ويحافظ على المراجعات والأجور السابقة.</p>
+<div class="grid"><section class="panel"><h3>بوالص صالحة</h3><strong>{{ valid|length }}</strong></section>
+<section class="panel"><h3>غير مسندة</h3><strong>{{ valid|rejectattr('assigned')|list|length }}</strong></section>
+<section class="panel"><h3>إسنادات غير صالحة</h3><strong>{{ invalid|length }}</strong></section></div></section>
+<section class="panel"><h2>البوالص الصالحة وإسنادها</h2><div class="scroll"><table>
+<tr><th>الشحنة</th><th>البوليصة</th><th>الحالة</th><th>الموظف</th><th>الإجراء</th></tr>
+{% for x in valid %}<tr><td>#{{ x.shipment_id }}</td><td>{{ x.bol_no }}</td>
+<td>{{ 'مسندة' if x.assigned else 'غير مسندة' }}</td><td>{{ x.operator_name or '—' }}</td>
+<td><form method="post" action="{{ url_for('assign_task') }}"><input type="hidden" name="csrf" value="{{ csrf }}">
+<input type="hidden" name="shipment_id" value="{{ x.shipment_id }}">
+<select name="user_id" required><option value="">اختر موظفاً</option>
+{% for u in users %}<option value="{{ u.id }}" {% if x.assigned and x.user_id==u.id %}selected{% endif %}>{{ u.full_name }}</option>{% endfor %}</select>
+<button type="submit">{{ 'تعديل الإسناد' if x.assigned else 'إسناد' }}</button></form></td></tr>
+{% else %}<tr><td colspan="5">لا توجد بوالص صالحة</td></tr>{% endfor %}</table></div></section>
+<section class="panel"><h2>الإسنادات القديمة أو غير الصالحة</h2>
+<p class="muted">يمكن تعطيل الإسناد بعد إنهاء أي مهام معلقة. لا يتم حذف الشحنة الأصلية.</p>
+<div class="scroll"><table><tr><th>الشحنة</th><th>الموظف</th><th>الحالة</th><th>الإجراء</th></tr>
+{% for x in invalid %}<tr><td>#{{ x.shipment_id }}</td><td>{{ x.full_name or '—' }}</td>
+<td>{{ x.reason }}</td><td><form method="post" action="{{ url_for('deactivate_assignment',shipment_id=x.shipment_id) }}">
+<input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit">تعطيل الإسناد</button></form></td></tr>
+{% else %}<tr><td colspan="4">لا توجد إسنادات غير صالحة</td></tr>{% endfor %}</table></div></section>
+<section class="panel"><a href="{{ url_for('distribution_preview_page') }}">معاينة التوزيع التلقائي للبوالص المؤهلة</a></section>""",
+valid=valid,invalid=invalid,users=users)
+
+
+@app.post("/assignments/manage/<int:shipment_id>/deactivate")
+@require("admin","supervisor")
+def deactivate_assignment(shipment_id):
+    try:
+        with db() as conn:
+            assignment_admin.deactivate(conn, current_user()["id"], shipment_id)
+        flash("تم تعطيل الإسناد مع الاحتفاظ بسجل المراجعات")
+    except (ValueError,LookupError,PermissionError) as exc:
+        flash("تعذر تعطيل الإسناد: " + str(exc))
+    return redirect(url_for("assignment_management"))
 
 @app.post("/assign")
 @require("admin","supervisor")
