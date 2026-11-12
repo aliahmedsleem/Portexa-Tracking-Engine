@@ -173,11 +173,23 @@ def authenticate(conn, username, password):
 
 
 def assign(conn, actor, shipment_id, user_id):
-    from portexa_tracking.portexa_bridge import get_source_shipment
+    from portexa_tracking.portexa_bridge import get_source_shipment, valid_bill_of_lading
     _require(conn, actor, ("admin", "supervisor"))
     target = _require(conn, user_id, ("operator",))
-    if get_source_shipment(shipment_id) is None:
+    shipment = get_source_shipment(shipment_id)
+    if shipment is None:
         raise LookupError("Shipment not found")
+    if not valid_bill_of_lading(shipment.get("bol_no")):
+        raise ValueError("Shipment has no valid bill of lading")
+    existing = conn.execute(
+        "SELECT user_id FROM ops_assignments WHERE shipment_id=? AND active=1",
+        (int(shipment_id),)).fetchone()
+    if existing and int(existing["user_id"]) != int(user_id):
+        pending = conn.execute(
+            "SELECT COUNT(*) FROM ops_tasks WHERE shipment_id=? AND status IN ('pending','submitted')",
+            (int(shipment_id),)).fetchone()[0]
+        if pending:
+            raise ValueError("Cannot reassign shipment with pending or submitted tasks")
     with conn:
         conn.execute("""INSERT INTO ops_assignments(shipment_id,user_id,assigned_at) VALUES(?,?,?)
           ON CONFLICT(shipment_id) DO UPDATE SET user_id=excluded.user_id,active=1,assigned_at=excluded.assigned_at""",
