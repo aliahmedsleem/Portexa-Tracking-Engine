@@ -12,10 +12,23 @@ def client(monkeypatch):
     ops.init_operations(db)
     admin = ops.create_user(db, None, "Admin", "0770", "admin", "strong-password-admin", "admin")
     operator = ops.create_user(db, admin, "Operator", "0771", "operator", "strong-password-operator")
+    # Admin dashboard reads source bills; supply an isolated fixture DB.
+    source = sqlite3.connect(":memory:", check_same_thread=False)
+    source.row_factory = sqlite3.Row
+    source.execute("""CREATE TABLE shipment (
+        id INTEGER PRIMARY KEY, bol_no TEXT
+    )""")
+    source.executemany("INSERT INTO shipment(id,bol_no) VALUES(?,?)",
+                       [(4,"MEDU123456"),(5,None),(8,"NULL")])
     monkeypatch.setattr(web, "db", lambda: _NonClosing(db))
+    monkeypatch.setattr("portexa_tracking.portexa_bridge.source_connection",
+                        lambda: _NonClosing(source))
+    monkeypatch.setattr("portexa_tracking.portexa_bridge.check_schema",
+                        lambda source_conn: None)
     web.app.config.update(TESTING=True, SECRET_KEY="test-only-secret")
     yield web.app.test_client()
     db.close()
+    source.close()
 
 
 class _NonClosing:
