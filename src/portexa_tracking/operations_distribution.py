@@ -4,7 +4,7 @@ Only reads the source database; never rewrites existing assignments or task hist
 """
 import os
 from collections import Counter
-from portexa_tracking.portexa_bridge import source_connection, check_schema
+from portexa_tracking.portexa_bridge import source_connection, check_schema, valid_bill_of_lading
 from portexa_tracking.operations import now_utc, audit
 
 TERMINAL = {"delivered","completed","cancelled","canceled","archived","closed",
@@ -28,8 +28,8 @@ def source_eligible_ids():
         raise ValueError("PORTEXA_OPS_ACTIVE_STATUSES must be configured after verifying source statuses")
     with source_connection() as source:
         check_schema(source)
-        return [int(row["id"]) for row in source.execute("SELECT id,status FROM shipment ORDER BY id")
-                if str(row["status"] or "").strip().casefold() in allowed]
+        return [int(row["id"]) for row in source.execute("SELECT id,status,bol_no FROM shipment ORDER BY id")
+                if str(row["status"] or "").strip().casefold() in allowed and valid_bill_of_lading(row["bol_no"])]
 
 
 def distribution_preview(conn, source_ids=None):
