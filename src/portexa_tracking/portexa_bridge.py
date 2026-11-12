@@ -45,12 +45,17 @@ def check_schema(conn):
         raise RuntimeError("PORTEXA shipment schema mismatch: " + ", ".join(sorted(missing)))
 
 
+def valid_bill_of_lading(value):
+    """Only meaningful bill references qualify for operational tracking."""
+    return isinstance(value, str) and bool(value.strip()) and value.strip().casefold() not in {"none", "null"}
+
+
 def list_source_shipments(limit=200, missing_only=False):
     limit = min(max(int(limit), 1), 500)
     with source_connection() as conn:
         check_schema(conn)
         columns = ", ".join(DISPLAY)
-        where = "WHERE bol_no IS NULL OR trim(bol_no) = ''" if missing_only else ""
+        where = "WHERE bol_no IS NULL OR trim(bol_no) = '' OR lower(trim(bol_no)) IN ('none','null')" if missing_only else ""
         rows = conn.execute(
             f"SELECT {columns} FROM shipment {where} ORDER BY id DESC LIMIT ?", (limit,)
         ).fetchall()
