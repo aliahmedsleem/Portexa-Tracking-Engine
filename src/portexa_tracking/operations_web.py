@@ -344,14 +344,33 @@ def home():
 <option value="1">تم تحديث بيانات الشحنة</option></select></label>
 <button>إرسال للمراجعة</button></form>{% endif %}</section>
 {% else %}<section class="panel">لا توجد مهام حالياً</section>{% endfor %}""",tasks=tasks,route_labels=ROUTE_LABELS,movement_labels=[(k,v) for k,v in ROUTE_LABELS if k!="container_number"],bol_filter=bol_filter,all_count=all_count,with_bol=with_bol,without_bol=without_bol)
+        # Audit active assignments against the current read-only Portexa source.
+        from portexa_tracking.portexa_bridge import source_connection, check_schema
+        with source_connection() as source:
+            check_schema(source)
+            valid_source_ids = {int(row["id"]) for row in source.execute(
+                "SELECT id,bol_no FROM shipment"
+            ) if valid_bill_of_lading(row["bol_no"])}
+        active_assignments = [dict(row) for row in conn.execute(
+            "SELECT shipment_id,user_id FROM ops_assignments WHERE active=1"
+        )]
+        valid_assigned_ids = {int(row["shipment_id"]) for row in active_assignments
+                              if int(row["shipment_id"]) in valid_source_ids}
+        invalid_assignment_count = len(active_assignments) - sum(
+            int(row["shipment_id"]) in valid_source_ids for row in active_assignments
+        )
+        unassigned_valid_count = len(valid_source_ids - valid_assigned_ids)
         stats = ops.dashboard_stats(conn, u["id"])
+        stats["assignments"] = len(valid_assigned_ids)
+        stats["invalid_assignments"] = invalid_assignment_count
+        stats["unassigned_valid"] = unassigned_valid_count
         users = [dict(r) for r in conn.execute("SELECT id,full_name,phone,username,role,active FROM ops_users ORDER BY id")]
-        assignments = dist.assignment_history(conn)
+        assignments = [a for a in dist.assignment_history(conn) if a["active"] and int(a["shipment_id"]) in valid_source_ids]
         pending = [dict(r) for r in conn.execute("SELECT t.id,t.shipment_id,t.user_id,t.review_note,t.evidence_source,t.route_changed FROM ops_tasks t WHERE t.status='submitted' ORDER BY t.id LIMIT 100")]
         return page("""<div class="grid">
 <section class="panel"><h3>المستخدمون</h3><strong>{{ stats.users }}</strong></section>
-<section class="panel"><h3>البوالص المسندة</h3><strong>{{ stats.assignments }}</strong></section>
-<section class="panel"><h3>نسبة الاعتماد</h3><strong>{{ stats.approval_rate }}%</strong></section>
+<section class="panel"><h3>البوالص المسندة الصالحة</h3><strong>{{ stats.assignments }}</strong></section>
+<section class="panel"><h3>بوالص صالحة غير مسندة</h3><strong>{{ stats.unassigned_valid }}</strong></section>\n<section class="panel"><h3>إسنادات قديمة أو غير صالحة</h3><strong>{{ stats.invalid_assignments }}</strong></section>\n<section class="panel"><h3>نسبة الاعتماد</h3><strong>{{ stats.approval_rate }}%</strong></section>
 <section class="panel"><h3>بانتظار المراجعة</h3><strong>{{ stats.tasks.get('submitted',0) }}</strong></section></div>
 <section class="panel"><h2>إدارة المستخدمين</h2><p class="muted">عرض حسابات الموظفين وتفاصيلهم وتعديلها من صفحة مستقلة.</p><a href="{{ url_for('users_page') }}">فتح إدارة المستخدمين</a></section>
 <section class="panel"><h2>التوزيع التلقائي العادل</h2>
