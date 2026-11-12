@@ -680,8 +680,8 @@ def assignment_management():
 <p class="muted">يمكن تعطيل الإسناد بعد إنهاء أي مهام معلقة. لا يتم حذف الشحنة الأصلية.</p>
 <div class="scroll"><table><tr><th>الشحنة</th><th>الموظف</th><th>الحالة</th><th>الإجراء</th></tr>
 {% for x in invalid %}<tr><td>#{{ x.shipment_id }}</td><td>{{ x.full_name or '—' }}</td>
-<td>{{ x.reason }}</td><td><form method="post" action="{{ url_for('deactivate_assignment',shipment_id=x.shipment_id) }}">
-<input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit">تعطيل الإسناد</button></form></td></tr>
+<td>{{ x.reason }} · معلقة: {{ x.pending_count }} · مرسلة للمراجعة: {{ x.submitted_count }}</td><td><form method="post" action="{{ url_for('deactivate_assignment',shipment_id=x.shipment_id) }}">
+<input type="hidden" name="csrf" value="{{ csrf }}"><label><input type="checkbox" name="confirm" value="yes" required> أؤكد أرشفة المهام المعلقة وتعطيل هذا الإسناد</label><button type="submit">تعطيل الإسناد</button></form></td></tr>
 {% else %}<tr><td colspan="4">لا توجد إسنادات غير صالحة</td></tr>{% endfor %}</table></div></section>
 <section class="panel"><a href="{{ url_for('distribution_preview_page') }}">معاينة التوزيع التلقائي للبوالص المؤهلة</a></section>""",
 valid=valid,invalid=invalid,users=users)
@@ -692,8 +692,8 @@ valid=valid,invalid=invalid,users=users)
 def deactivate_assignment(shipment_id):
     try:
         with db() as conn:
-            assignment_admin.deactivate(conn, current_user()["id"], shipment_id)
-        flash("تم تعطيل الإسناد مع الاحتفاظ بسجل المراجعات")
+            cancelled = assignment_admin.deactivate(conn, current_user()["id"], shipment_id, request.form.get("confirm") == "yes")
+        flash(f"تم تعطيل الإسناد وأرشفة {cancelled} مهمة معلقة مع الاحتفاظ بسجل المراجعات")
     except (ValueError,LookupError,PermissionError) as exc:
         flash("تعذر تعطيل الإسناد: " + str(exc))
     return redirect(url_for("assignment_management"))
