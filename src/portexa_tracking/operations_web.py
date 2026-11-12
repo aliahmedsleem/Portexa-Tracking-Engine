@@ -9,7 +9,7 @@ from functools import wraps
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 from portexa_tracking import operations_shipment_edit as edit
 from portexa_tracking import manual_routes as routes
-from portexa_tracking.portexa_bridge import get_source_shipment, read_container_movements, read_container_history, save_shipment_bundle, MOVEMENT_FIELDS
+from portexa_tracking.portexa_bridge import get_source_shipment, read_container_movements, read_container_history, save_shipment_bundle, MOVEMENT_FIELDS, valid_bill_of_lading
 from flask import Flask, abort, flash, redirect, render_template_string, request, session, url_for
 from markupsafe import escape
 from portexa_tracking.database import connect
@@ -261,16 +261,16 @@ def home():
                 except (OSError, ValueError, RuntimeError, PermissionError) as exc:
                     task["shipment"] = None
                     task["source_error"] = "تعذر قراءة بيانات الشحنة"
-            bol_filter = request.args.get("bol_filter", "all")
+            bol_filter = request.args.get("bol_filter", "with")
             if bol_filter not in ("all", "with", "without"):
-                bol_filter = "all"
+                bol_filter = "with"
             all_count = len(tasks)
-            with_bol = sum(1 for t in tasks if t.get("shipment") and (t["shipment"].get("bol_no") or "").strip())
-            without_bol = sum(1 for t in tasks if t.get("shipment") and not (t["shipment"].get("bol_no") or "").strip())
+            with_bol = sum(1 for t in tasks if t.get("shipment") and valid_bill_of_lading(t["shipment"].get("bol_no")))
+            without_bol = sum(1 for t in tasks if t.get("shipment") and not valid_bill_of_lading(t["shipment"].get("bol_no")))
             if bol_filter == "with":
-                tasks = [t for t in tasks if t.get("shipment") and (t["shipment"].get("bol_no") or "").strip()]
+                tasks = [t for t in tasks if t.get("shipment") and valid_bill_of_lading(t["shipment"].get("bol_no"))]
             elif bol_filter == "without":
-                tasks = [t for t in tasks if t.get("shipment") and not (t["shipment"].get("bol_no") or "").strip()]
+                tasks = [t for t in tasks if t.get("shipment") and not valid_bill_of_lading(t["shipment"].get("bol_no"))]
             return page("""<section class="panel"><h2>البوالص المسندة إليّ</h2>
 <form method="get" action="{{ url_for('home') }}">
 <label>فلترة الشحنات حسب رقم بوليصة الشحن
