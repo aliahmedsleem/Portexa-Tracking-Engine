@@ -36,7 +36,8 @@ def deactivate(conn, actor, shipment_id, confirm=False):
     # Check source eligibility again at execution time, not just when the page loaded.
     if sid in source_bills():
         raise ValueError("Valid source bill: use reassignment instead")
-    with conn:
+    conn.execute("SAVEPOINT assignment_deactivation")
+    try:
         row = conn.execute("SELECT active FROM ops_assignments WHERE shipment_id=?", (sid,)).fetchone()
         if row is None or not row["active"]:
             raise LookupError("Active assignment not found")
@@ -68,4 +69,9 @@ def deactivate(conn, actor, shipment_id, confirm=False):
         conn.execute("UPDATE ops_assignments SET active=0 WHERE shipment_id=?", (sid,))
         ops.audit(conn, actor, "shipment.assignment.deactivated", "shipment", sid,
                   f"archived_pending={len(pending)}; submitted=0; review history retained")
+        conn.execute("RELEASE SAVEPOINT assignment_deactivation")
         return len(pending)
+    except Exception:
+        conn.execute("ROLLBACK TO SAVEPOINT assignment_deactivation")
+        conn.execute("RELEASE SAVEPOINT assignment_deactivation")
+        raise
