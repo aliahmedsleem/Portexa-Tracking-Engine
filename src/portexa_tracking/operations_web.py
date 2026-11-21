@@ -725,7 +725,44 @@ def price():
 @app.post("/notifications/send")
 @require("admin","supervisor")
 def send_notice():
-    return action(lambda c,a: ops.notify(c,a,int(request.form["user_id"]),request.form["title"],request.form["body"]))
+    try:
+        with db() as conn:
+            ops.notify(conn,current_user()["id"],int(request.form["user_id"]),
+                       request.form["title"],request.form["body"])
+        flash("تم إرسال الإشعار")
+    except (ValueError,LookupError,PermissionError) as exc:
+        flash("تعذر إرسال الإشعار: "+str(exc))
+    return redirect(url_for("notifications"))
+
+
+@app.get("/notifications/count")
+@require()
+def notification_count():
+    from flask import jsonify
+    with db() as conn:
+        count = conn.execute("SELECT COUNT(*) FROM ops_notifications WHERE user_id=? AND read_at IS NULL",
+                             (current_user()["id"],)).fetchone()[0]
+    return jsonify({"unread":count})
+
+
+@app.post("/notifications/<int:notification_id>/read")
+@require()
+def mark_notification_read(notification_id):
+    with db() as conn:
+        with conn:
+            conn.execute("UPDATE ops_notifications SET read_at=? WHERE id=? AND user_id=? AND read_at IS NULL",
+                         (ops.now_utc(),notification_id,current_user()["id"]))
+    return redirect(url_for("notifications"))
+
+
+@app.post("/notifications/read-all")
+@require()
+def mark_all_notifications_read():
+    with db() as conn:
+        with conn:
+            conn.execute("UPDATE ops_notifications SET read_at=? WHERE user_id=? AND read_at IS NULL",
+                         (ops.now_utc(),current_user()["id"]))
+    return redirect(url_for("notifications"))
 
 
 @app.get("/notifications")
@@ -733,8 +770,38 @@ def send_notice():
 def notifications():
     u = current_user()
     with db() as conn:
-        rows = [dict(r) for r in conn.execute("SELECT * FROM ops_notifications WHERE user_id=? ORDER BY id DESC LIMIT 100",(u["id"],))]
-    return page("""<section class="panel"><h2>الإشعارات</h2>{% for n in rows %}<div class="panel"><strong>{{ n.title }}</strong><p>{{ n.body }}</p><small>{{ n.created_at }}</small></div>{% else %}<p>لا توجد إشعارات</p>{% endfor %}</section>""",rows=rows)
+        rows = [dict(r) for r in conn.execute(
+            "SELECT * FROM ops_notifications WHERE user_id=? ORDER BY id DESC LIMIT 100",(u["id"],))]
+        unread = conn.execute(
+            "SELECT COUNT(*) FROM ops_notifications WHERE user_id=? AND read_at IS NULL",(u["id"],)).fetchone()[0]
+    return page("""<section class="panel"><h2>الإشعارات <span id="unread-count">({{ unread }} غير مقروء)</span></h2>
+<form method="post" action="{{ url_for('mark_all_notifications_read') }}">
+<input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit">تحديد الكل كمقروء</button></form>
+<p class="muted">تتحدث الصفحة تلقائياً عند وصول إشعارات جديدة.</p>
+{% for n in rows %}<div class="panel">
+<strong>{{ n.title }}{% if not n.read_at %} · جديد{% endif %}</strong>
+<p>{{ n.body }}</p><small>{{ n.created_at }}</small>
+{% if not n.read_at %}<form method="post" action="{{ url_for('mark_notification_read',notification_id=n.id) }}">
+<input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit">تحديد كمقروء</button></form>{% endif %}
+</div>{% else %}<p>لا توجد إشعارات</p>{% endfor %}</section>
+<script>
+(function(){
+let previous={{ unread|tojson }};
+async function poll(){
+  if(document.hidden)return;
+  try{
+    const response=await fetch({{ url_for('notification_count')|tojson }},{cache:'no-store'});
+    if(!response.ok)return;
+    const data=await response.json();
+    if(data.unread>previous){location.reload();return;}
+    previous=data.unread;
+    const label=document.getElementById('unread-count');
+    if(label)label.textContent='('+data.unread+' غير مقروء)';
+  }catch(e){}
+}
+setInterval(poll,15000);
+})();
+</script>""",rows=rows,unread=unread)
 
 
 @app.get("/payroll/<int:user_id>")
