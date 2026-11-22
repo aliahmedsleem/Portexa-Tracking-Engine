@@ -3,6 +3,7 @@ import sqlite3
 import pytest
 from portexa_tracking import operations as ops
 from portexa_tracking import operations_shipment_edit as edit
+from portexa_tracking import operations_followup as followup
 
 
 @pytest.fixture
@@ -17,6 +18,8 @@ def setup(monkeypatch, tmp_path):
     opsdb.execute("""INSERT INTO ops_tasks(shipment_id,cycle_at,user_id,price_iqd,created_at)
                     VALUES(?,?,?,?,?)""",(1,"2026-11-09T12:00:00+03:00",worker,250,ops.now_utc()))
     opsdb.commit()
+    followup.init(opsdb)
+    followup.assign(opsdb, admin, 1, worker)
     task = opsdb.execute("SELECT id FROM ops_tasks").fetchone()[0]
     source = tmp_path / "portexa-test.db"
     with sqlite3.connect(source) as conn:
@@ -82,3 +85,30 @@ def test_validation_before_log(setup):
     with pytest.raises(ValueError):
         edit.save_shipment(conn,worker,task,payload("x"*121),expected())
     assert conn.execute("SELECT COUNT(*) FROM ops_shipment_change_log").fetchone()[0]==0
+
+
+
+def test_completed_followup_rejects_shipment_edit(setup):
+    conn, task, worker, other, source = setup
+
+    followup.complete(conn, worker, 1)
+
+    with pytest.raises(PermissionError, match="Completed"):
+        edit.save_shipment(
+            conn,
+            worker,
+            task,
+            payload("TEST-002"),
+            expected(),
+        )
+
+    with sqlite3.connect(source) as db:
+        actual = db.execute(
+            "SELECT bol_no FROM shipment WHERE id=1"
+        ).fetchone()[0]
+
+    assert actual == "TEST-001"
+
+    assert conn.execute(
+        "SELECT COUNT(*) FROM ops_shipment_change_log"
+    ).fetchone()[0] == 0

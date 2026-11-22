@@ -29,70 +29,469 @@ app.config.update(
 )
 CSS = """
 <style>
-:root{font-family:system-ui,Tahoma,Arial,sans-serif;color-scheme:dark;background:#091522;color:#e9f0f7;--bg:#091522;--panel:#14273a;--line:#2c4359;--gold:#e8bf78;--muted:#aebed0}
+:root{
+  font-family:system-ui,Tahoma,Arial,sans-serif;
+  color-scheme:light;
+  --bg:#f5f7fb;
+  --panel:#ffffff;
+  --line:#e2e8f0;
+  --gold:#2563eb;
+  --muted:#64748b;
+  --text:#172b4d;
+  --primary:#2563eb;
+  background:var(--bg);
+  color:var(--text);
+}
 *{box-sizing:border-box}
-body{margin:0;min-height:100vh;background:radial-gradient(circle at 85% 0%,#17334a 0%,var(--bg) 55%);line-height:1.65}
-a{color:var(--gold);text-decoration:none}a:hover{text-decoration:underline}
-.app-shell{min-height:100vh;display:grid;grid-template-columns:260px minmax(0,1fr)}
-.sidebar{position:sticky;top:0;height:100vh;overflow-y:auto;background:#0e2032;border-left:1px solid var(--line);padding:26px 16px;display:flex;flex-direction:column;gap:26px}
-.brand{display:flex;align-items:center;gap:12px;padding:4px 9px 22px;border-bottom:1px solid var(--line)}
-.brand-mark{display:grid;place-items:center;width:44px;height:44px;flex-shrink:0;border:1px solid #a7844c;border-radius:13px;background:#2c302e;color:#f5d59a;font-weight:900;font-size:24px}
-.brand strong{display:block;color:#f5d59a;font-size:18px;line-height:1.3;letter-spacing:.6px}
-.brand small{display:block;color:var(--muted);font-size:11px}
-.side-label{font-size:11px;color:#91a9bc;padding:0 13px;margin-bottom:8px;letter-spacing:.4px}
-.side-nav{display:flex;flex-direction:column;gap:6px}
-.side-nav a{display:flex;align-items:center;gap:10px;padding:11px 14px;border-radius:10px;color:#d3e0eb;font-size:14px;font-weight:600}
-.side-nav a:hover,.side-nav a.active{background:#243b50;color:#f5d59a;text-decoration:none}
-.side-nav .nav-symbol{width:24px;text-align:center;font-size:18px}
-.sidebar-footer{margin-top:auto;border-top:1px solid var(--line);padding:16px 8px 0}
-.profile-name{font-weight:700;overflow-wrap:anywhere}
-.profile-role{font-size:12px;color:var(--muted);margin:3px 0 12px}
+html{scroll-behavior:smooth}
+body{
+  margin:0;
+  min-height:100vh;
+  background:var(--bg);
+  color:var(--text);
+  line-height:1.7;
+  font-size:14px;
+}
+a{color:var(--primary);text-decoration:none}
+a:hover{text-decoration:underline}
+.app-shell{
+  min-height:100vh;
+  display:grid;
+  grid-template-columns:255px minmax(0,1fr);
+}
+.sidebar{
+  position:sticky;
+  top:0;
+  height:100vh;
+  overflow-y:auto;
+  background:#fff;
+  border-left:1px solid var(--line);
+  padding:25px 16px;
+  display:flex;
+  flex-direction:column;
+  gap:25px;
+}
+.brand{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  padding:5px 10px 23px;
+  border-bottom:1px solid var(--line);
+}
+.brand-mark{
+  display:grid;
+  place-items:center;
+  width:46px;
+  height:46px;
+  flex-shrink:0;
+  border-radius:13px;
+  background:#e8f0fe;
+  color:#2563eb;
+  font-size:25px;
+  font-weight:900;
+}
+.brand strong{
+  display:block;
+  color:#172b4d;
+  font-size:19px;
+  line-height:1.3;
+}
+.brand small{
+  color:#64748b;
+  font-size:11px;
+}
+.side-label{
+  font-size:11px;
+  color:#94a3b8;
+  padding:0 13px;
+  margin-bottom:8px;
+}
+.side-nav{
+  display:flex;
+  flex-direction:column;
+  gap:5px;
+}
+.side-nav a{
+  display:flex;
+  align-items:center;
+  gap:11px;
+  padding:12px 14px;
+  border-radius:10px;
+  color:#475569;
+  font-size:14px;
+  font-weight:600;
+}
+.side-nav a:hover,
+.side-nav a.active{
+  background:#eaf1ff;
+  color:#1d4ed8;
+  text-decoration:none;
+}
+.side-nav .nav-symbol{
+  width:24px;
+  text-align:center;
+  font-size:18px;
+}
+.sidebar-footer{
+  margin-top:auto;
+  border-top:1px solid var(--line);
+  padding:17px 8px 0;
+}
+.profile-name{
+  font-weight:700;
+  overflow-wrap:anywhere;
+}
+.profile-role{
+  font-size:12px;
+  color:var(--muted);
+  margin:3px 0 12px;
+}
 .sidebar-footer form{margin:0}
-.sidebar-footer button{width:100%;background:#253a4d;color:#f3d9ab;border:1px solid #456078}
+.sidebar-footer button{
+  width:100%;
+  background:#f1f5f9;
+  color:#475569;
+  border:1px solid #e2e8f0;
+}
 .workspace{min-width:0}
-.topbar{min-height:78px;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:16px clamp(18px,3vw,40px);border-bottom:1px solid var(--line);background:#102235aa}
-.topbar h1{margin:0;font-size:clamp(17px,2vw,23px);color:#f3d19a}
-.topbar p{margin:3px 0 0;color:var(--muted);font-size:12px}
-.workspace-tag{font-size:12px;color:#b8c9d8;border:1px solid #36536b;border-radius:999px;padding:5px 12px;white-space:nowrap}
-main{max-width:1500px;margin:0 auto;padding:clamp(16px,2.5vw,36px);min-width:0}
-h2{font-size:20px;color:#f2d39b;margin:0 0 18px}h3{font-size:16px;margin:0 0 10px}
-.panel{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:clamp(16px,2vw,24px);margin:0 0 18px;box-shadow:0 10px 28px #0002;min-width:0}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:16px}
-label{display:block;margin:0 0 16px;font-size:14px;color:#c8d7e6}
-input,select,textarea{display:block;width:100%;min-height:44px;margin-top:7px;padding:11px 13px;border-radius:9px;border:1px solid #49657e;background:#091c2e;color:#fff;font:inherit}
-textarea{min-height:95px;resize:vertical}
-input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-visible,a:focus-visible{outline:2px solid #f2cc85;outline-offset:2px}
-button{width:auto;min-height:42px;padding:10px 20px;background:var(--gold);color:#10243b;border:0;border-radius:9px;font:inherit;font-weight:700;cursor:pointer}
-button:hover{filter:brightness(1.09)}
+.topbar{
+  min-height:78px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:14px;
+  padding:16px clamp(18px,3vw,40px);
+  border-bottom:1px solid var(--line);
+  background:#fff;
+}
+.topbar h1{
+  margin:0;
+  font-size:clamp(18px,2vw,23px);
+  color:#172b4d;
+}
+.topbar p{
+  margin:3px 0 0;
+  color:var(--muted);
+  font-size:12px;
+}
+.workspace-tag{
+  font-size:12px;
+  color:#64748b;
+  border:1px solid var(--line);
+  border-radius:999px;
+  padding:5px 12px;
+}
+main{
+  max-width:1500px;
+  margin:0 auto;
+  padding:clamp(16px,2.5vw,36px);
+  min-width:0;
+}
+h2{
+  font-size:20px;
+  color:#172b4d;
+  margin:0 0 18px;
+}
+h3{
+  font-size:16px;
+  color:#334155;
+  margin:0 0 10px;
+}
+.panel{
+  background:#fff;
+  border:1px solid var(--line);
+  border-radius:15px;
+  padding:clamp(16px,2vw,24px);
+  margin:0 0 18px;
+  box-shadow:0 3px 14px rgba(15,23,42,.035);
+  min-width:0;
+}
+.grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));
+  gap:16px;
+}
+label{
+  display:block;
+  margin:0 0 16px;
+  font-size:14px;
+  color:#475569;
+}
+input,select,textarea{
+  display:block;
+  width:100%;
+  min-height:44px;
+  margin-top:7px;
+  padding:11px 13px;
+  border-radius:9px;
+  border:1px solid #cbd5e1;
+  background:#fff;
+  color:#172b4d;
+  font:inherit;
+}
+textarea{
+  min-height:95px;
+  resize:vertical;
+}
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+button:focus-visible,
+a:focus-visible{
+  outline:2px solid #2563eb;
+  outline-offset:2px;
+}
+button{
+  width:auto;
+  min-height:42px;
+  padding:10px 20px;
+  background:#2563eb;
+  color:#fff;
+  border:0;
+  border-radius:9px;
+  font:inherit;
+  font-weight:700;
+  cursor:pointer;
+  transition:background .15s ease;
+}
+button:hover{
+  background:#1d4ed8;
+}
 form{max-width:100%}
-.scroll{overflow-x:auto;border:1px solid var(--line);border-radius:10px}
-table{width:100%;border-collapse:collapse;min-width:620px}
-td,th{text-align:right;padding:13px;border-bottom:1px solid #29465d;font-size:14px}
-th{color:#e8c688;background:#1c3951}
-tbody tr:hover{background:#20394d}
-.muted{color:var(--muted)}.error{color:#ffc6a9}strong{font-size:19px}
-.flash{border-color:#7e6945;background:#2a2c2b}
-input[type="hidden"],input[hidden],#nav-open{display:none!important}\n.mobile-toggle,.mobile-backdrop{display:none}
-.auth-shell{min-height:100vh;display:grid;place-items:center;padding:20px}
+.scroll{
+  overflow-x:auto;
+  border:1px solid var(--line);
+  border-radius:10px;
+  background:#fff;
+}
+table{
+  width:100%;
+  border-collapse:collapse;
+  min-width:620px;
+}
+td,th{
+  text-align:right;
+  padding:13px 15px;
+  border-bottom:1px solid #e2e8f0;
+  font-size:14px;
+}
+th{
+  color:#475569;
+  background:#f8fafc;
+  font-weight:700;
+}
+tbody tr:hover{background:#f8faff}
+.muted{color:var(--muted)}
+.error{color:#b91c1c}
+strong{font-size:19px}
+.flash{
+  border-color:#bfdbfe;
+  background:#eff6ff;
+  color:#1e40af;
+}
+input[type="hidden"],
+input[hidden],
+#nav-open{display:none!important}
+.mobile-toggle,.mobile-backdrop{display:none}
+.auth-shell{
+  min-height:100vh;
+  display:grid;
+  place-items:center;
+  padding:20px;
+}
 .auth-container{width:min(100%,450px)}
-.auth-brand{justify-content:center;border:0;padding-bottom:25px}
-.auth-container .panel{padding:clamp(24px,4vw,38px)}
-.auth-container .panel h2{text-align:center;margin-bottom:24px}
+.auth-brand{
+  justify-content:center;
+  border:0;
+  padding-bottom:25px;
+}
+.auth-container .panel{
+  padding:clamp(24px,4vw,38px);
+}
+.auth-container .panel h2{
+  text-align:center;
+  margin-bottom:24px;
+}
 .auth-container .panel form button{width:100%}
+.container-item{
+  border:1px solid #e2e8f0;
+  border-radius:12px;
+  margin:14px 0;
+  padding:16px;
+  min-width:0;
+  background:#f8fafc;
+}
+.container-item legend{
+  color:#334155;
+  font-weight:700;
+}
+.bundle-actions{
+  display:flex;
+  flex-wrap:wrap;
+  gap:10px;
+  margin:16px 0;
+}
+.bundle-actions button,
+.remove-container{
+  background:#eaf1ff;
+  color:#1d4ed8;
+  border:1px solid #bfdbfe;
+}
+.bundle-actions button:hover,
+.remove-container:hover{
+  background:#dbeafe;
+}
+.bundle-save{
+  width:100%;
+  max-width:420px;
+}
 @media(max-width:980px){
-.app-shell{grid-template-columns:minmax(0,1fr)}
-.sidebar{position:fixed;z-index:30;right:0;top:0;width:min(300px,85vw);height:100dvh;transform:translateX(105%);transition:transform .2s ease;box-shadow:-10px 0 30px #0005}
-.mobile-toggle{display:inline-flex;align-items:center;justify-content:center;min-width:42px;height:42px;padding:0 10px;background:#20384b;color:#f5d59a;border:1px solid #456078;font-size:23px}
-.mobile-backdrop{display:block;position:fixed;inset:0;z-index:20;background:#0009;opacity:0;pointer-events:none;transition:opacity .2s}
-#nav-open:checked~.app-shell .sidebar{transform:translateX(0)}
-#nav-open:checked~.app-shell .mobile-backdrop{opacity:1;pointer-events:auto}
+  .app-shell{grid-template-columns:minmax(0,1fr)}
+  .sidebar{
+    position:fixed;
+    z-index:30;
+    right:0;
+    top:0;
+    width:min(300px,85vw);
+    height:100dvh;
+    transform:translateX(105%);
+    transition:transform .2s ease;
+    box-shadow:-10px 0 30px #0f172a20;
+  }
+  .mobile-toggle{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    min-width:42px;
+    height:42px;
+    padding:0 10px;
+    background:#eff6ff;
+    color:#2563eb;
+    border:1px solid #bfdbfe;
+    border-radius:9px;
+    font-size:23px;
+  }
+  .mobile-backdrop{
+    display:block;
+    position:fixed;
+    inset:0;
+    z-index:20;
+    background:#0f172a80;
+    opacity:0;
+    pointer-events:none;
+    transition:opacity .2s;
+  }
+  #nav-open:checked~.app-shell .sidebar{
+    transform:translateX(0);
+  }
+  #nav-open:checked~.app-shell .mobile-backdrop{
+    opacity:1;
+    pointer-events:auto;
+  }
 }
 @media(max-width:600px){
-.topbar{padding:13px 14px;min-height:66px}.workspace-tag{display:none}
-main{padding:14px}.panel{margin-bottom:12px}.grid{gap:10px}table{min-width:550px}
+  .topbar{padding:13px 14px;min-height:66px}
+  .workspace-tag{display:none}
+  main{padding:14px}
+  .panel{margin-bottom:12px}
+  .grid{gap:10px}
+  table{min-width:550px}
+  td,th{padding:11px}
 }
-@media(prefers-reduced-motion:reduce){.sidebar,.mobile-backdrop{transition:none}}
-.container-item{border:1px solid #456078;border-radius:12px;margin:14px 0;padding:16px;min-width:0}.container-item legend{color:#f2d39b;font-weight:700}.bundle-actions{display:flex;flex-wrap:wrap;gap:10px;margin:16px 0}.bundle-actions button,.remove-container{background:#273e51;color:#f2d39b;border:1px solid #4a6276}.bundle-save{width:100%;max-width:420px}</style>
+@media(prefers-reduced-motion:reduce){
+  .sidebar,.mobile-backdrop,button{transition:none}
+}
+
+/* PORTEXA Operations - light bill management */
+.bol-workspace{display:flex;flex-direction:column;gap:18px}
+.bol-workspace>.panel{margin-bottom:0}
+.bol-heading,.bol-section-title{
+  display:flex;justify-content:space-between;align-items:center;
+  flex-wrap:wrap;gap:16px
+}
+.bol-heading h2,.bol-section-title h2{margin-bottom:5px}
+.bol-heading p,.bol-section-title p{margin:0}
+.bol-link{
+  display:inline-flex;align-items:center;justify-content:center;
+  padding:11px 16px;background:#eff6ff;color:#1d4ed8;
+  border:1px solid #bfdbfe;border-radius:10px;font-weight:700
+}
+.bol-stats{
+  display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px
+}
+.bol-stat{
+  background:#fff;border:1px solid #e2e8f0;
+  border-radius:14px;padding:20px;
+  display:flex;flex-direction:column;gap:5px
+}
+.bol-stat span{color:#64748b;font-size:13px}
+.bol-stat strong{color:#172b4d;font-size:30px;line-height:1.35}
+.bol-stat small{color:#94a3b8;font-size:12px}
+.bol-filters{
+  display:grid;grid-template-columns:minmax(0,2fr) minmax(180px,1fr);
+  gap:14px;margin:20px 0
+}
+.bol-filters label{margin:0}
+.bol-result-count{color:#64748b;font-size:13px}
+.bol-list{display:grid;gap:12px}
+.bol-item{
+  border:1px solid #e2e8f0;border-radius:13px;
+  padding:18px;background:#fff;min-width:0
+}
+.bol-item:hover{border-color:#bfdbfe}
+.bol-item-top,.bol-item-bottom{
+  display:flex;align-items:center;justify-content:space-between;
+  gap:18px;flex-wrap:wrap
+}
+.bol-item-top{margin-bottom:15px}
+.bol-item-top h3{
+  margin:4px 0 0;color:#172b4d;font-size:17px;
+  overflow-wrap:anywhere
+}
+.bol-eyebrow{color:#64748b;font-size:12px}
+.bol-chip{
+  display:inline-flex;align-items:center;padding:5px 11px;
+  border-radius:999px;font-size:12px;font-weight:700
+}
+.bol-chip-assigned{background:#ecfdf5;color:#047857}
+.bol-chip-unassigned{background:#eff6ff;color:#1d4ed8}
+.bol-chip-warning{background:#fff7ed;color:#c2410c}
+.bol-owner{display:flex;flex-direction:column;gap:4px}
+.bol-owner strong{font-size:14px;color:#334155}
+.bol-assign-form{
+  display:flex;align-items:end;gap:10px;flex-wrap:wrap
+}
+.bol-assign-form label{margin:0;min-width:190px}
+.bol-assign-form select{margin-top:5px}
+.bol-assign-form button{white-space:nowrap}
+.bol-invalid{margin-top:12px;background:#fffdfb}
+.bol-meta{display:flex;flex-wrap:wrap;gap:12px;color:#64748b}
+.bol-danger-form{margin-top:15px}
+.bol-confirm{
+  display:flex;align-items:center;gap:9px;margin-bottom:12px
+}
+.bol-confirm input{width:18px;min-height:18px;margin:0}
+.bol-danger-form button{background:#fff1f2;color:#be123c;border:1px solid #fecdd3}
+.bol-danger-form button:hover{background:#ffe4e6}
+.bol-empty{padding:22px;text-align:center;color:#64748b}
+.bol-item[hidden],.bol-empty[hidden]{display:none!important}
+@media(max-width:1100px){
+  .bol-stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:650px){
+  .bol-stats{gap:9px}
+  .bol-stat{padding:14px}
+  .bol-stat strong{font-size:25px}
+  .bol-filters{grid-template-columns:1fr}
+  .bol-item{padding:14px}
+  .bol-item-bottom{align-items:stretch}
+  .bol-assign-form,.bol-assign-form label,.bol-assign-form button{
+    width:100%
+  }
+  .bol-assign-form label{min-width:0}
+}
+
+</style>
 """
 BASE = """<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>PORTEXA Operations</title>""" + CSS + """</head><body>
 {% if user %}
@@ -411,15 +810,41 @@ def save_shipment_bundle_page(task_id):
             raise ValueError("حقول الحاويات غير متطابقة")
         containers = [dict(container_number=number, **{k: movements[k][i] for k in MOVEMENT_FIELDS})
                       for i, number in enumerate(numbers)]
+        from portexa_tracking import operations_followup as followup
+        from portexa_tracking.operations_followup_lock import editable_transaction
+
         with db() as conn:
-            task = edit.authorized_task(conn, current_user()["id"], task_id)
-            values = {k: request.form.get(k, "") for k in edit.FIELDS}
-            changed = save_shipment_bundle(task["shipment_id"], values, signed["values"],
-                                           containers, signed["containers"], actor_id=current_user()["id"])
-            with conn:
-                ops.audit(conn, current_user()["id"], "shipment.bundle.saved", "shipment",
-                          task["shipment_id"], "changed=" + str(bool(changed)) +
-                          ";containers=" + str(len(containers)))
+            actor_id = current_user()["id"]
+            task = edit.authorized_task(conn, actor_id, task_id)
+            shipment_id = task["shipment_id"]
+
+            values = {
+                key: request.form.get(key, "")
+                for key in edit.FIELDS
+            }
+
+            with editable_transaction(conn, actor_id, shipment_id):
+                changed = save_shipment_bundle(
+                    shipment_id,
+                    values,
+                    signed["values"],
+                    containers,
+                    signed["containers"],
+                    actor_id=actor_id,
+                )
+
+                if changed:
+                    followup.record_update(conn, actor_id, shipment_id)
+
+                ops.audit(
+                    conn,
+                    actor_id,
+                    "shipment.bundle.saved",
+                    "shipment",
+                    shipment_id,
+                    "changed=" + str(bool(changed))
+                    + ";containers=" + str(len(containers)),
+                )
         flash("تم حفظ معلومات الشحنة والحاويات مباشرة في PORTEXA" if changed else "لا توجد تغييرات للحفظ")
     except (BadSignature, SignatureExpired, KeyError, TypeError):
         flash("انتهت صلاحية النموذج؛ حدّث الصفحة")
@@ -435,13 +860,38 @@ def save_shipment_route(task_id):
         signed = snapshot_signer().loads(request.form.get("route_snapshot", ""), max_age=3600)
         if not isinstance(signed, dict) or signed.get("task_id") != task_id:
             abort(403)
+        from portexa_tracking import operations_followup as followup
+        from portexa_tracking.operations_followup_lock import editable_transaction
+
         with db() as conn:
-            task = edit.authorized_task(conn, current_user()["id"], task_id)
-            values = {key:request.form.get(key, "") for key in routes.FIELDS}
-            saved = routes.save_route(task["shipment_id"], values, signed.get("updated_at"))
-            with conn:
-                ops.audit(conn, current_user()["id"], "shipment.route.updated", "shipment",
-                          task["shipment_id"], "updated_at="+saved["updated_at"])
+            actor_id = current_user()["id"]
+
+            task = edit.authorized_task(conn, actor_id, task_id)
+            shipment_id = task["shipment_id"]
+
+            values = {
+                key: request.form.get(key, "")
+                for key in routes.FIELDS
+            }
+
+            with editable_transaction(conn, actor_id, shipment_id):
+                saved = routes.save_route(
+                    shipment_id,
+                    values,
+                    signed.get("updated_at"),
+                    conn=conn,
+                )
+
+                followup.record_update(conn, actor_id, shipment_id)
+
+                ops.audit(
+                    conn,
+                    actor_id,
+                    "shipment.route.updated",
+                    "shipment",
+                    shipment_id,
+                    "updated_at=" + saved["updated_at"],
+                )
         flash("تم حفظ الموانئ ومسار الشحنة")
     except (BadSignature, SignatureExpired, KeyError, TypeError):
         flash("انتهت صلاحية النموذج؛ حدّث الصفحة")
@@ -660,31 +1110,191 @@ def assignment_management():
     with db() as conn:
         valid, invalid = assignment_admin.inventory(conn)
         users = [dict(r) for r in conn.execute(
-            "SELECT id,full_name FROM ops_users WHERE role='operator' AND active=1 ORDER BY full_name")]
-    return page("""<section class="panel"><h2>إدارة إسنادات البوالص</h2>
-<p class="muted">البيانات تقرأ مباشرة من Portexa. حذف الإسناد يعطله داخل Operations فقط ويحافظ على المراجعات والأجور السابقة.</p>
-<div class="grid"><section class="panel"><h3>بوالص صالحة</h3><strong>{{ valid|length }}</strong></section>
-<section class="panel"><h3>غير مسندة</h3><strong>{{ valid|rejectattr('assigned')|list|length }}</strong></section>
-<section class="panel"><h3>إسنادات غير صالحة</h3><strong>{{ invalid|length }}</strong></section></div></section>
-<section class="panel"><h2>البوالص الصالحة وإسنادها</h2><div class="scroll"><table>
-<tr><th>الشحنة</th><th>البوليصة</th><th>الحالة</th><th>الموظف</th><th>الإجراء</th></tr>
-{% for x in valid %}<tr><td>#{{ x.shipment_id }}</td><td>{{ x.bol_no }}</td>
-<td>{{ 'مسندة' if x.assigned else 'غير مسندة' }}</td><td>{{ x.operator_name or '—' }}</td>
-<td><form method="post" action="{{ url_for('assign_task') }}"><input type="hidden" name="csrf" value="{{ csrf }}">
-<input type="hidden" name="shipment_id" value="{{ x.shipment_id }}">
-<select name="user_id" required><option value="">اختر موظفاً</option>
-{% for u in users %}<option value="{{ u.id }}" {% if x.assigned and x.user_id==u.id %}selected{% endif %}>{{ u.full_name }}</option>{% endfor %}</select>
-<button type="submit">{{ 'تعديل الإسناد' if x.assigned else 'إسناد' }}</button></form></td></tr>
-{% else %}<tr><td colspan="5">لا توجد بوالص صالحة</td></tr>{% endfor %}</table></div></section>
-<section class="panel"><h2>الإسنادات القديمة أو غير الصالحة</h2>
-<p class="muted">يمكن تعطيل الإسناد بعد إنهاء أي مهام معلقة. لا يتم حذف الشحنة الأصلية.</p>
-<div class="scroll"><table><tr><th>الشحنة</th><th>الموظف</th><th>الحالة</th><th>الإجراء</th></tr>
-{% for x in invalid %}<tr><td>#{{ x.shipment_id }}</td><td>{{ x.full_name or '—' }}</td>
-<td>{{ x.reason }} · معلقة: {{ x.pending_count }} · مرسلة للمراجعة: {{ x.submitted_count }}</td><td><form method="post" action="{{ url_for('deactivate_assignment',shipment_id=x.shipment_id) }}">
-<input type="hidden" name="csrf" value="{{ csrf }}"><label><input type="checkbox" name="confirm" value="yes" required> أؤكد أرشفة المهام المعلقة وتعطيل هذا الإسناد</label><button type="submit">تعطيل الإسناد</button></form></td></tr>
-{% else %}<tr><td colspan="4">لا توجد إسنادات غير صالحة</td></tr>{% endfor %}</table></div></section>
-<section class="panel"><a href="{{ url_for('distribution_preview_page') }}">معاينة التوزيع التلقائي للبوالص المؤهلة</a></section>""",
-valid=valid,invalid=invalid,users=users)
+            "SELECT id,full_name FROM ops_users "
+            "WHERE role='operator' AND active=1 ORDER BY full_name"
+        )]
+
+    return page("""<div class="bol-workspace">
+<section class="panel bol-heading">
+  <div>
+    <h2>إدارة البوالص والإسنادات</h2>
+    <p class="muted">متابعة البوالص الصالحة وإسنادها للموظفين، مع الحفاظ على سجل المراجعات.</p>
+  </div>
+  <a class="bol-link" href="{{ url_for('distribution_preview_page') }}">معاينة التوزيع التلقائي</a>
+</section>
+
+<div class="bol-stats">
+  <div class="bol-stat">
+    <span>البوالص الصالحة</span>
+    <strong>{{ valid|length }}</strong>
+    <small>جاهزة للمتابعة</small>
+  </div>
+  <div class="bol-stat">
+    <span>البوالص المسندة</span>
+    <strong>{{ valid|selectattr('assigned')|list|length }}</strong>
+    <small>لديها موظف مسؤول</small>
+  </div>
+  <div class="bol-stat">
+    <span>غير مسندة</span>
+    <strong>{{ valid|rejectattr('assigned')|list|length }}</strong>
+    <small>تحتاج إلى إسناد</small>
+  </div>
+  <div class="bol-stat">
+    <span>إسنادات تحتاج مراجعة</span>
+    <strong>{{ invalid|length }}</strong>
+    <small>قديمة أو غير صالحة</small>
+  </div>
+</div>
+
+<section class="panel">
+  <div class="bol-section-title">
+    <div>
+      <h2>قائمة البوالص</h2>
+      <p class="muted">ابحث وصفِّ النتائج ثم اختر الموظف المسؤول.</p>
+    </div>
+    <span class="bol-result-count" id="bol-result-count"></span>
+  </div>
+
+  <div class="bol-filters">
+    <label>البحث
+      <input id="bol-search" type="search"
+             placeholder="رقم الشحنة، البوليصة أو الموظف..."
+             autocomplete="off">
+    </label>
+    <label>حالة الإسناد
+      <select id="bol-status">
+        <option value="all">جميع البوالص</option>
+        <option value="assigned">مسندة</option>
+        <option value="unassigned">غير مسندة</option>
+      </select>
+    </label>
+  </div>
+
+  <div class="bol-list">
+    {% for x in valid %}
+    <article class="bol-item"
+             data-search="{{ (x.shipment_id|string ~ ' ' ~ x.bol_no ~ ' ' ~ (x.operator_name or ''))|lower }}"
+             data-status="{{ 'assigned' if x.assigned else 'unassigned' }}">
+      <div class="bol-item-top">
+        <div>
+          <span class="bol-eyebrow">شحنة #{{ x.shipment_id }}</span>
+          <h3>{{ x.bol_no }}</h3>
+        </div>
+        {% if x.assigned %}
+          <span class="bol-chip bol-chip-assigned">مسندة</span>
+        {% else %}
+          <span class="bol-chip bol-chip-unassigned">غير مسندة</span>
+        {% endif %}
+      </div>
+
+      <div class="bol-item-bottom">
+        <div class="bol-owner">
+          <span class="muted">الموظف المسؤول</span>
+          <strong>{{ x.operator_name or 'لم يتم الإسناد' }}</strong>
+        </div>
+
+        <form method="post" action="{{ url_for('assign_task') }}"
+              class="bol-assign-form">
+          <input type="hidden" name="csrf" value="{{ csrf }}">
+          <input type="hidden" name="shipment_id" value="{{ x.shipment_id }}">
+          <label>
+            اختيار الموظف
+            <select name="user_id" required>
+              <option value="">اختر موظفاً</option>
+              {% for u in users %}
+              <option value="{{ u.id }}"
+                {% if x.assigned and x.user_id==u.id %}selected{% endif %}>
+                {{ u.full_name }}
+              </option>
+              {% endfor %}
+            </select>
+          </label>
+          <button type="submit">{{ 'تعديل الإسناد' if x.assigned else 'إسناد البوليصة' }}</button>
+        </form>
+      </div>
+    </article>
+    {% else %}
+    <div class="bol-empty">لا توجد بوالص صالحة حالياً.</div>
+    {% endfor %}
+  </div>
+
+  <p class="bol-empty" id="bol-no-results" hidden>
+    لا توجد نتائج مطابقة للبحث أو التصفية.
+  </p>
+</section>
+
+<section class="panel">
+  <div class="bol-section-title">
+    <div>
+      <h2>الإسنادات القديمة أو غير الصالحة</h2>
+      <p class="muted">التعطيل لا يحذف الشحنة الأصلية أو سجل المراجعات.</p>
+    </div>
+  </div>
+
+  {% for x in invalid %}
+  <article class="bol-item bol-invalid">
+    <div class="bol-item-top">
+      <div>
+        <span class="bol-eyebrow">شحنة #{{ x.shipment_id }}</span>
+        <h3>{{ x.full_name or 'موظف غير معروف' }}</h3>
+      </div>
+      <span class="bol-chip bol-chip-warning">تحتاج مراجعة</span>
+    </div>
+
+    <p class="muted">{{ x.reason }}</p>
+    <div class="bol-meta">
+      <span>مهام معلقة: {{ x.pending_count }}</span>
+      <span>مرسلة للمراجعة: {{ x.submitted_count }}</span>
+    </div>
+
+    <form method="post"
+          action="{{ url_for('deactivate_assignment',shipment_id=x.shipment_id) }}"
+          class="bol-danger-form">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label class="bol-confirm">
+        <input type="checkbox" name="confirm" value="yes" required>
+        أؤكد أرشفة المهام المعلقة وتعطيل هذا الإسناد
+      </label>
+      <button type="submit">تعطيل الإسناد</button>
+    </form>
+  </article>
+  {% else %}
+  <p class="muted">لا توجد إسنادات غير صالحة.</p>
+  {% endfor %}
+</section>
+</div>
+
+<script>
+(function(){
+  const search = document.getElementById('bol-search');
+  const status = document.getElementById('bol-status');
+  const items = Array.from(document.querySelectorAll('.bol-list .bol-item'));
+  const count = document.getElementById('bol-result-count');
+  const empty = document.getElementById('bol-no-results');
+
+  function update(){
+    const query = search.value.trim().toLocaleLowerCase();
+    const selected = status.value;
+    let visible = 0;
+
+    items.forEach(item => {
+      const matchText = item.dataset.search.includes(query);
+      const matchStatus = selected === 'all' ||
+                          item.dataset.status === selected;
+      const show = matchText && matchStatus;
+      item.hidden = !show;
+      if(show) visible++;
+    });
+
+    count.textContent = visible + ' من ' + items.length + ' بوليصة';
+    empty.hidden = visible !== 0 || items.length === 0;
+  }
+
+  search.addEventListener('input', update);
+  status.addEventListener('change', update);
+  update();
+})();
+</script>""", valid=valid, invalid=invalid, users=users)
 
 
 @app.post("/assignments/manage/<int:shipment_id>/deactivate")

@@ -39,7 +39,7 @@ def get_routes(ids):
         return {row["source_shipment_id"]: dict(row) for row in rows}
 
 
-def save_route(shipment_id, values, expected_updated_at):
+def save_route(shipment_id, values, expected_updated_at, conn=None):
     from portexa_tracking.portexa_bridge import source_connection
     with source_connection() as source:
         exists = source.execute("SELECT 1 FROM shipment WHERE id=?", (int(shipment_id),)).fetchone()
@@ -64,9 +64,8 @@ def save_route(shipment_id, values, expected_updated_at):
                 raise ValueError("Invalid date: " + key) from exc
         cleaned[key] = value
     now = datetime.now(timezone.utc).isoformat(timespec="microseconds")
-    with connect() as conn:
-        init_routes(conn)
-        conn.execute("BEGIN IMMEDIATE")
+
+    def _save_route_with_conn(conn):
         old = conn.execute("SELECT updated_at FROM portexa_manual_routes WHERE source_shipment_id=?", (int(shipment_id),)).fetchone()
         if (old["updated_at"] if old else None) != expected_updated_at:
             raise RuntimeError("Route was changed; reload before saving")
@@ -76,5 +75,15 @@ def save_route(shipment_id, values, expected_updated_at):
             ",".join(f"{k}=excluded.{k}" for k in FIELDS) + ",updated_at=excluded.updated_at",
             (int(shipment_id), *(cleaned[k] for k in FIELDS), now)
         )
-        conn.commit()
         return dict(conn.execute("SELECT * FROM portexa_manual_routes WHERE source_shipment_id=?", (int(shipment_id),)).fetchone())
+
+    from portexa_tracking.operations_followup import followup_transaction
+
+    if conn is None:
+        with connect() as owned_conn:
+            init_routes(owned_conn)
+            with followup_transaction(owned_conn):
+                return _save_route_with_conn(owned_conn)
+
+    with followup_transaction(conn):
+        return _save_route_with_conn(conn)

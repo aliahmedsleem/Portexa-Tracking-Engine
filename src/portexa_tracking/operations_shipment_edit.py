@@ -17,6 +17,11 @@ def authorized_task(conn, actor, task_id):
     """, (task_id, actor, actor)).fetchone()
     if row is None:
         raise PermissionError("المهمة غير مسندة إليك أو غير قابلة للتعديل")
+
+    # Enforce the new follow-up lifecycle on every legacy task edit.
+    from portexa_tracking import operations_followup as followup
+    followup.require_editable(conn, actor, row["shipment_id"])
+
     return dict(row)
 
 
@@ -55,64 +60,130 @@ def _validate(values):
 
 
 def save_shipment(conn, actor, task_id, values, expected):
-    """Serialize operations edits; record intent before writing to separate source DB."""
+    """Durable intent, protected source write, and follow-up accounting."""
+    from portexa_tracking import operations_followup as followup
+    from portexa_tracking.operations_followup_lock import editable_transaction
+
     values = _validate(values)
+
     if not isinstance(expected, dict) or set(expected) != set(FIELDS):
         raise ValueError("أعد فتح نموذج التعديل")
-    # SQLite write lock prevents simultaneous reassignment by this operations service.
+
+    # Phase 1: persist the intent before touching the source database.
     conn.execute("BEGIN IMMEDIATE")
     try:
         task, current = editable_shipment(conn, actor, task_id)
+
         if any(current[k] != expected[k] for k in FIELDS):
             raise RuntimeError("تغيرت بيانات الشحنة؛ حدّث الصفحة قبل الحفظ")
-        changed = {k: v for k, v in values.items() if v != current[k]}
+
+        changed = {
+            key: value
+            for key, value in values.items()
+            if value != current[key]
+        }
+
         if not changed:
             conn.rollback()
             return {"changed": False, "shipment": current}
-        old = {k: current[k] for k in changed}
+
+        old = {key: current[key] for key in changed}
+
         log_id = conn.execute("""
             INSERT INTO ops_shipment_change_log
-              (task_id,shipment_id,user_id,original_values,updated_values,status,created_at)
+              (task_id,shipment_id,user_id,original_values,
+               updated_values,status,created_at)
             VALUES (?,?,?,?,?,'pending',?)
-        """, (task_id, task["shipment_id"], actor,
-              json.dumps(old,ensure_ascii=False), json.dumps(changed,ensure_ascii=False),
-              ops.now_utc())).lastrowid
+        """, (
+            task_id,
+            task["shipment_id"],
+            actor,
+            json.dumps(old, ensure_ascii=False),
+            json.dumps(changed, ensure_ascii=False),
+            ops.now_utc(),
+        )).lastrowid
+
         conn.commit()
-    except Exception:
+    except BaseException:
         conn.rollback()
         raise
 
+    shipment_id = task["shipment_id"]
+
+    # Phase 2: lock follow-up state while writing the source database.
     try:
-        result = update_source_shipment(task["shipment_id"], changed, old)
+        with editable_transaction(conn, actor, shipment_id):
+            authorized_task(conn, actor, task_id)
+
+            latest = get_source_shipment(shipment_id)
+            if latest is None:
+                raise LookupError("الشحنة غير موجودة")
+
+            if any(latest[key] != expected[key] for key in FIELDS):
+                raise RuntimeError(
+                    "تغيرت بيانات الشحنة؛ حدّث الصفحة قبل الحفظ"
+                )
+
+            result = update_source_shipment(shipment_id, changed, old)
+
+            followup.record_update(conn, actor, shipment_id)
+
+            conn.execute("""
+                UPDATE ops_shipment_change_log
+                SET status='applied',applied_at=?
+                WHERE id=? AND status='pending'
+            """, (ops.now_utc(), log_id))
+
+            ops.audit(
+                conn, actor, "shipment.updated",
+                "shipment", shipment_id,
+                "log_id=" + str(log_id),
+            )
+
+        return {
+            "changed": True,
+            "shipment": result,
+            "log_id": log_id,
+        }
+
     except Exception as exc:
-        # Read back: the source commit may have succeeded before a later failure.
+        # Do not blindly retry: the source commit might have succeeded.
         try:
-            after = get_source_shipment(task["shipment_id"])
+            after = get_source_shipment(shipment_id)
         except Exception:
             after = None
+
         if after is None:
-            raise RuntimeError("نتيجة الحفظ غير مؤكدة؛ راجع سجل التحديثات قبل إعادة المحاولة") from exc
-        if all(after[k] == v for k, v in changed.items()):
-            status = "applied"
-            result = after
-        elif all(after[k] == v for k, v in old.items()):
+            raise RuntimeError(
+                "نتيجة الحفظ غير مؤكدة؛ راجع سجل التحديثات"
+            ) from exc
+
+        if all(after[key] == value for key, value in changed.items()):
+            # Source may have committed. Leave pending for reconciliation.
+            raise RuntimeError(
+                "تم رصد التعديل في المصدر لكن تثبيت المتابعة غير مؤكد؛ "
+                "تحتاج العملية إلى مصالحة"
+            ) from exc
+
+        if all(after[key] == value for key, value in old.items()):
             status = "failed"
         else:
             status = "conflict"
-        with conn:
-            conn.execute("""UPDATE ops_shipment_change_log SET status=?,error_message=?,applied_at=?
-                            WHERE id=? AND status='pending'""",
-                         (status,str(exc)[:500],ops.now_utc() if status=="applied" else None,log_id))
-            ops.audit(conn, actor, "shipment.edit."+status, "shipment", task["shipment_id"], str(log_id))
-        if status != "applied":
-            raise RuntimeError("تعذر حفظ التعديل: " + str(exc)) from exc
 
-    with conn:
-        conn.execute("""UPDATE ops_shipment_change_log
-                        SET status='applied',applied_at=?
-                        WHERE id=? AND status='pending'""",(ops.now_utc(),log_id))
-        ops.audit(conn,actor,"shipment.updated","shipment",task["shipment_id"],"log_id="+str(log_id))
-    return {"changed": True, "shipment": result, "log_id": log_id}
+        with conn:
+            conn.execute("""
+                UPDATE ops_shipment_change_log
+                SET status=?,error_message=?
+                WHERE id=? AND status='pending'
+            """, (status, str(exc)[:500], log_id))
+
+            ops.audit(
+                conn, actor, "shipment.edit." + status,
+                "shipment", shipment_id,
+                "log_id=" + str(log_id),
+            )
+
+        raise RuntimeError("تعذر حفظ التعديل: " + str(exc)) from exc
 
 
 def pending_changes(conn):
@@ -123,32 +194,128 @@ def pending_changes(conn):
 
 
 def reconcile_pending(conn):
-    """Conservative reconciliation: leave ambiguous or overwritten edits pending."""
+    """Recover confirmed source updates without racing source writers."""
+    from portexa_tracking import operations_followup as followup
+    from portexa_tracking.portexa_bridge import (
+        source_connection,
+        check_schema,
+        DISPLAY,
+    )
+
     results = []
+
     for item in pending_changes(conn):
+        if conn.in_transaction:
+            raise RuntimeError(
+                "Reconciliation requires a connection without an active transaction"
+            )
+
         try:
-            current = get_source_shipment(item["shipment_id"])
-            if current is None:
-                results.append((item["id"],"unknown"))
-                continue
             old = json.loads(item["original_values"])
             new = json.loads(item["updated_values"])
-            if all(current[k] == v for k,v in new.items()):
-                status = "applied"
-            elif all(current[k] == v for k,v in old.items()):
-                # May still have been applied then overwritten: do not infer failure.
-                results.append((item["id"],"needs_review"))
+
+            if (
+                not isinstance(old, dict)
+                or not isinstance(new, dict)
+                or not new
+                or set(old) != set(new)
+                or set(new) - set(FIELDS)
+            ):
+                results.append((item["id"], "needs_review"))
                 continue
-            else:
-                results.append((item["id"],"needs_review"))
-                continue
-            with conn:
-                conn.execute("""UPDATE ops_shipment_change_log SET status=?,applied_at=?
-                                WHERE id=? AND status='pending'""",
-                             (status,ops.now_utc(),item["id"]))
-                ops.audit(conn,item["user_id"],"shipment.reconciled","shipment",item["shipment_id"],
-                          "log_id="+str(item["id"]))
-            results.append((item["id"],status))
-        except (OSError,ValueError,RuntimeError,sqlite3.Error):
-            results.append((item["id"],"unknown"))
+
+            conn.execute("BEGIN IMMEDIATE")
+
+            try:
+                row = conn.execute("""
+                    SELECT status
+                    FROM ops_shipment_change_log
+                    WHERE id=?
+                """, (item["id"],)).fetchone()
+
+                if row is None or row["status"] != "pending":
+                    conn.rollback()
+                    continue
+
+                owner = followup.get(conn, item["shipment_id"])
+
+                if (
+                    owner is None
+                    or owner["user_id"] != item["user_id"]
+                    or owner["status"] != "active"
+                ):
+                    conn.rollback()
+                    results.append((item["id"], "needs_review"))
+                    continue
+
+                # Acquire the source write lock before reading.
+                with source_connection(write=True) as source:
+                    check_schema(source)
+                    source.execute("BEGIN IMMEDIATE")
+
+                    current_row = source.execute(
+                        "SELECT " + ", ".join(DISPLAY) +
+                        " FROM shipment WHERE id=?",
+                        (int(item["shipment_id"]),),
+                    ).fetchone()
+
+                    if current_row is None:
+                        source.rollback()
+                        conn.rollback()
+                        results.append((item["id"], "unknown"))
+                        continue
+
+                    current = dict(current_row)
+
+                    if not all(
+                        current[key] == value
+                        for key, value in new.items()
+                    ):
+                        source.rollback()
+                        conn.rollback()
+                        results.append((item["id"], "needs_review"))
+                        continue
+
+                    # Source stays locked through operations commit.
+                    followup.record_update(
+                        conn,
+                        item["user_id"],
+                        item["shipment_id"],
+                    )
+
+                    changed = conn.execute("""
+                        UPDATE ops_shipment_change_log
+                        SET status='applied', applied_at=?
+                        WHERE id=? AND status='pending'
+                    """, (ops.now_utc(), item["id"]))
+
+                    if changed.rowcount != 1:
+                        raise RuntimeError(
+                            "Pending change was modified"
+                        )
+
+                    ops.audit(
+                        conn,
+                        item["user_id"],
+                        "shipment.reconciled",
+                        "shipment",
+                        item["shipment_id"],
+                        "log_id=" + str(item["id"]),
+                    )
+
+                    conn.commit()
+                    source.rollback()
+
+                    results.append((item["id"], "applied"))
+
+            except BaseException:
+                if conn.in_transaction:
+                    conn.rollback()
+                raise
+
+        except (OSError, ValueError, RuntimeError, sqlite3.Error):
+            if conn.in_transaction:
+                conn.rollback()
+            results.append((item["id"], "unknown"))
+
     return results
