@@ -247,7 +247,10 @@ def home():
     u = current_user()
     with db() as conn:
         if u["role"] == "operator":
-            tasks = ops.my_tasks(conn, u["id"])
+            assigned_ids = {int(r[0]) for r in conn.execute("SELECT shipment_id FROM ops_assignments WHERE user_id=? AND active=1", (u["id"],))}
+            eligible_ids = set(dist.source_eligible_ids())
+            tasks = [t for t in ops.my_tasks(conn, u["id"], limit=500)
+                     if int(t["shipment_id"]) in assigned_ids & eligible_ids]
             earnings = conn.execute("SELECT COALESCE(SUM(price_iqd),0) FROM ops_tasks WHERE user_id=? AND status='approved'", (u["id"],)).fetchone()[0]
             paid = conn.execute("SELECT COALESCE(SUM(amount_iqd),0) FROM ops_payments WHERE user_id=?", (u["id"],)).fetchone()[0]
             for task in tasks:
@@ -266,8 +269,9 @@ def home():
                 except (OSError, ValueError, RuntimeError, PermissionError) as exc:
                     task["shipment"] = None
                     task["source_error"] = "تعذر قراءة بيانات الشحنة"
+            tasks = [t for t in tasks if t.get("shipment") and valid_bill_of_lading(t["shipment"].get("bol_no")) and t.get("can_edit")]
             bol_filter = request.args.get("bol_filter", "with")
-            if bol_filter not in ("all", "with", "without"):
+            if bol_filter not in ("all", "with"):
                 bol_filter = "with"
             all_count = len(tasks)
             with_bol = sum(1 for t in tasks if t.get("shipment") and valid_bill_of_lading(t["shipment"].get("bol_no")))
@@ -282,15 +286,15 @@ def home():
 <select name="bol_filter" onchange="this.form.submit()">
 <option value="all" {% if bol_filter == 'all' %}selected{% endif %}>جميع الشحنات ({{ all_count }})</option>
 <option value="with" {% if bol_filter == 'with' %}selected{% endif %}>تحتوي على بوليصة ({{ with_bol }})</option>
-<option value="without" {% if bol_filter == 'without' %}selected{% endif %}>بدون بوليصة ({{ without_bol }})</option>
+
 </select></label>
 <noscript><button type="submit">تطبيق الفلتر</button></noscript>
 </form>
 <p>عدد المهام المعروضة: {{ tasks|length }}</p>
-<p class="muted">الشحنات التي تعذرت قراءتها لا تُحسب ضمن فلتر وجود البوليصة.</p>
+<p class="muted">تظهر فقط المهام الصالحة والمسندة إليك والمتاحة للمراجعة.</p>
 <p class="muted">التعديل يحفظ بيانات الشحنة مباشرة عند تفعيل الكتابة، واعتماد المراجعة والأجر إجراء منفصل.</p></section>
 {% for t in tasks %}<section class="panel"><h3>شحنة #{{ t.shipment_id }}</h3>
-<p>الدورة: {{ t.cycle_at }} · الحالة: {{ t.status }} · الأجر: {{ t.price_iqd }} د.ع</p>
+<p>الدورة: {{ t.cycle_at[:10] }} {{ t.cycle_at[11:16] }} · الحالة: {{ {"pending":"قيد العمل","rejected":"مرفوضة — تحتاج تصحيحاً"}.get(t.status,t.status) }} · الأجر: {{ t.price_iqd }} د.ع</p>
 {% if t.shipment %}
 <div class="grid">
 <div><label>رقم الفاتورة (للعرض)</label><p>{{ t.shipment.invoice_no or 'غير مسجل' }}</p></div>
