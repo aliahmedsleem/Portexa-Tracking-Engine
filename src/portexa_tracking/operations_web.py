@@ -248,9 +248,16 @@ def home():
     with db() as conn:
         if u["role"] == "operator":
             assigned_ids = {int(r[0]) for r in conn.execute("SELECT shipment_id FROM ops_assignments WHERE user_id=? AND active=1", (u["id"],))}
-            eligible_ids = set(dist.source_eligible_ids())
             tasks = [t for t in ops.my_tasks(conn, u["id"], limit=500)
-                     if int(t["shipment_id"]) in assigned_ids & eligible_ids]
+                     if int(t["shipment_id"]) in assigned_ids]
+            if tasks:
+                try:
+                    eligible_ids = set(dist.source_eligible_ids())
+                except (ValueError, OSError, RuntimeError) as exc:
+                    app.logger.warning("Cannot verify eligible shipments: %s", exc)
+                    flash("تعذر التحقق من صلاحية البوالص حالياً")
+                    eligible_ids = set()
+                tasks = [t for t in tasks if int(t["shipment_id"]) in eligible_ids]
             earnings = conn.execute("SELECT COALESCE(SUM(price_iqd),0) FROM ops_tasks WHERE user_id=? AND status='approved'", (u["id"],)).fetchone()[0]
             paid = conn.execute("SELECT COALESCE(SUM(amount_iqd),0) FROM ops_payments WHERE user_id=?", (u["id"],)).fetchone()[0]
             for task in tasks:
