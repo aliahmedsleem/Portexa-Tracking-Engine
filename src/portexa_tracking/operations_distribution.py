@@ -63,12 +63,21 @@ def distribute(conn, actor, source_ids=None):
     plan = distribution_preview(conn,source_ids)
     if plan["unassigned"] and not plan["users"]:
         raise ValueError("No active operators available")
-    with conn:
+    from portexa_tracking import operations_followup as followup
+    followup.init(conn)
+    with followup.followup_transaction(conn):
         for sid,uid in plan["plan"]:
             cur = conn.execute(
                 "INSERT OR IGNORE INTO ops_assignments(shipment_id,user_id,active,assigned_at) VALUES(?,?,1,?)",
                 (sid,uid,now_utc()))
             if cur.rowcount == 1:
+                now = now_utc()
+                conn.execute("""INSERT OR IGNORE INTO ops_followups
+                    (shipment_id,user_id,status,assigned_at,last_updated_at)
+                    VALUES(?,?,'active',?,?)""",(sid,uid,now,now))
+                followup.event(conn,sid,actor,"auto_assigned","user_id="+str(uid))
+                conn.execute("""INSERT INTO ops_notifications(user_id,title,body,created_at)
+                    VALUES(?,?,?,?)""",(uid,"إسناد بوليصة جديدة","تم إسناد الشحنة #"+str(sid),now))
                 audit(conn,actor,"shipment.auto_assigned","shipment",sid,"user_id="+str(uid))
         if plan["plan"]:
             audit(conn,actor,"distribution.completed","assignment",None,
