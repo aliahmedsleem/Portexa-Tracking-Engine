@@ -4,6 +4,8 @@ Default is dry-run. Use --apply only after source status mapping is validated.
 Run at 00,06,12,18 Asia/Baghdad via a dedicated scheduler service/timer.
 """
 import argparse
+import os
+from portexa_tracking.portexa_bridge import source_connection, check_schema, valid_bill_of_lading
 from datetime import datetime, timezone
 from portexa_tracking.database import connect
 from portexa_tracking import operations_followup as followup
@@ -45,6 +47,48 @@ def sync_followups(conn, eligible_ids):
     return created
 
 
+def synchronize_source(conn):
+    """Discover bills and close only explicitly confirmed terminal source statuses."""
+    terminal = {"received", "delivered", "تم الاستلام", "تم التسليم"}
+    terminal.update(v.strip().casefold() for v in os.environ.get(
+        "PORTEXA_OPS_TERMINAL_STATUSES", "").split(",") if v.strip())
+    with source_connection() as source:
+        check_schema(source)
+        rows = [dict(r) for r in source.execute("SELECT id,bol_no,status FROM shipment")]
+    followup.init(conn)
+    now = followup.stamp()
+    discovered = closed = 0
+    with conn:
+        conn.execute("""CREATE TABLE IF NOT EXISTS ops_discovered_bills(
+            shipment_id INTEGER NOT NULL, bol_no TEXT NOT NULL,
+            discovered_at TEXT NOT NULL, PRIMARY KEY(shipment_id,bol_no))""")
+        for row in rows:
+            sid = row["id"]
+            if valid_bill_of_lading(row["bol_no"]):
+                bol = str(row["bol_no"]).strip()
+                cur = conn.execute("INSERT OR IGNORE INTO ops_discovered_bills VALUES(?,?,?)",
+                                   (sid,bol,now))
+                if cur.rowcount:
+                    discovered += 1
+                    conn.execute("""INSERT INTO ops_notifications(user_id,title,body,created_at)
+                        SELECT id,?,?,? FROM ops_users WHERE active=1 AND role IN ('admin','supervisor')""",
+                        ("بوليصة مكتشفة", bol, now))
+            if str(row["status"] or "").strip().casefold() in terminal:
+                record = followup.get(conn,sid)
+                if record and record["status"] == "active":
+                    cur = conn.execute("""UPDATE ops_followups SET status='completed',
+                        completed_at=?,completed_by=NULL WHERE shipment_id=? AND status='active'""",
+                        (now,sid))
+                    if cur.rowcount:
+                        closed += 1
+                        followup.event(conn,sid,0,"source_completed",str(row["status"]))
+                        conn.execute("""INSERT INTO ops_notifications(user_id,title,body,created_at)
+                            SELECT id,?,?,? FROM ops_users WHERE active=1 AND
+                            (role IN ('admin','supervisor') OR id=?)""",
+                            ("انتهاء المتابعة", str(row["bol_no"] or sid), now,record["user_id"]))
+    return discovered, closed
+
+
 def preview(conn, when=None):
     active, inactive = eligible_assignments(conn)
     slot = cycle_start(when or datetime.now(timezone.utc))
@@ -76,6 +120,8 @@ def main():
         p.error("--auto-assign requires --apply and --actor-id")
     with connect() as conn:
         init_operations(conn)
+        if args.apply:
+            print('Discovered / closed:', synchronize_source(conn))
         if args.auto_assign:
             plan = distribute(conn,args.actor_id)
             print("Auto-assigned:",len(plan["plan"]))
