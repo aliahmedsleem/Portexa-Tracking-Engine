@@ -7,7 +7,7 @@ from collections import Counter
 from portexa_tracking.portexa_bridge import source_connection, check_schema, valid_bill_of_lading
 from portexa_tracking.operations import now_utc, audit
 
-TERMINAL = {"delivered","completed","cancelled","canceled","archived","closed",
+TERMINAL = {"received","delivered","completed","cancelled","canceled","archived","closed",
             "تم التسليم","مكتملة","ملغاة","مؤرشفة","مغلق"}
 
 
@@ -24,6 +24,7 @@ def source_eligible_ids():
     """Only statuses explicitly approved by the administrator are eligible."""
     allowed = {value.strip().casefold() for value in os.environ.get(
         "PORTEXA_OPS_ACTIVE_STATUSES", "").split(",") if value.strip()}
+    allowed -= TERMINAL
     if not allowed:
         raise ValueError("PORTEXA_OPS_ACTIVE_STATUSES must be configured after verifying source statuses")
     with source_connection() as source:
@@ -34,6 +35,9 @@ def source_eligible_ids():
 
 def distribution_preview(conn, source_ids=None):
     ids = source_eligible_ids() if source_ids is None else sorted(set(map(int, source_ids)))
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='ops_followups'").fetchone():
+        completed = {int(r[0]) for r in conn.execute("SELECT shipment_id FROM ops_followups WHERE status='completed'")}
+        ids = [sid for sid in ids if sid not in completed]
     users = [dict(r) for r in conn.execute(
         "SELECT id,full_name,phone FROM ops_users WHERE role='operator' AND active=1 ORDER BY id")]
     assigned = {int(r["shipment_id"]):int(r["user_id"]) for r in conn.execute(
