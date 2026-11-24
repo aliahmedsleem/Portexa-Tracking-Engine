@@ -58,6 +58,7 @@ def test_no_pay_before_approval_and_rejected_task(db):
     admin, operator = setup_users(db)
     db.execute("INSERT INTO ops_tasks(shipment_id,cycle_at,user_id,price_iqd,created_at) VALUES(?,?,?,?,?)",
                (11, "2026-11-08T12:00:00+03:00", operator, 250, op.now_utc()))
+    db.execute("INSERT INTO ops_assignments(shipment_id,user_id,assigned_at) VALUES(?,?,?)", (11,operator,op.now_utc()))
     task_id = db.execute("SELECT id FROM ops_tasks").fetchone()[0]
     with pytest.raises(ValueError):
         op.submit_task(db, operator, task_id, "", "done", False)
@@ -79,3 +80,32 @@ def test_generate_only_verified_eligible_ids(db):
     assert op.generate_tasks(db,dt,eligible_ids=[101]) == 1
     assert op.generate_tasks(db,dt,eligible_ids=[101]) == 0
     assert [r[0] for r in db.execute("SELECT shipment_id FROM ops_tasks")] == [101]
+
+
+def test_followup_lifecycle(db):
+    from datetime import timedelta
+    admin, operator = setup_users(db)
+    now = datetime.now(timezone.utc)
+    db.execute("INSERT INTO ops_assignments(shipment_id,user_id,assigned_at) VALUES(?,?,?)",
+               (701,operator,op.now_utc()))
+    assert op.generate_tasks(db,now) == 1
+    first = db.execute("SELECT id FROM ops_tasks").fetchone()[0]
+    assert op.generate_tasks(db,now+timedelta(days=4)) == 0
+    op.submit_task(db,operator,first,"Carrier","Checked",False)
+    op.decide_task(db,admin,first,True)
+    assert op.my_tasks(db,operator) == []
+    assert op.generate_tasks(db,now+timedelta(hours=71)) == 0
+    assert op.generate_tasks(db,now+timedelta(hours=73)) == 1
+    second = db.execute("SELECT MAX(id) FROM ops_tasks").fetchone()[0]
+    db.execute("UPDATE ops_followup SET next_check_at=? WHERE shipment_id=701",
+               ((now-timedelta(seconds=1)).isoformat(),))
+    op.submit_task(db,operator,second,"Carrier","All containers arrived",True,completed=True)
+    op.decide_task(db,admin,second,True)
+    assert db.execute("SELECT state FROM ops_followup WHERE shipment_id=701").fetchone()[0] == "completed"
+    assert op.generate_tasks(db,now+timedelta(days=10)) == 0
+    assert op.my_tasks(db,operator) == []
+    balance = op.payroll(db,admin,operator)["balance_iqd"]
+    assert balance == 500
+    op.record_payment(db,admin,operator,balance)
+    assert op.payroll(db,admin,operator)["balance_iqd"] == 0
+    assert op.payroll(db,admin,operator)["earned_iqd"] == 500
