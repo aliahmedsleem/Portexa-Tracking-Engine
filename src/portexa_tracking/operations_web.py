@@ -649,6 +649,20 @@ def home():
     with db() as conn:
         if u["role"] == "operator":
             tasks = ops.my_tasks(conn, u["id"])
+            visible = []
+            seen = set()
+            for task in tasks:
+                sid = task["shipment_id"]
+                record = followup.get(conn, sid)
+                if not record or record["status"] != "active" or record["user_id"] != u["id"]:
+                    continue
+                if task["status"] not in ("pending", "rejected") or sid in seen:
+                    continue
+                if record["update_count"] and followup.utcnow() < followup.parse(record["last_updated_at"]) + followup.INTERVAL:
+                    continue
+                seen.add(sid)
+                visible.append(task)
+            tasks = visible
             for task in tasks:
                 try:
                     task["shipment"] = get_source_shipment(task["shipment_id"])
