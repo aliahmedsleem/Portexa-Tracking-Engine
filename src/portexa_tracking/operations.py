@@ -183,6 +183,8 @@ def assign(conn, actor, shipment_id, user_id):
     from portexa_tracking.portexa_bridge import get_source_shipment, valid_bill_of_lading
     _require(conn, actor, ("admin", "supervisor"))
     target = _require(conn, user_id, ("operator",))
+    if conn.execute("SELECT 1 FROM ops_followup WHERE shipment_id=? AND (state='completed' OR julianday(next_check_at)>julianday('now'))",(int(shipment_id),)).fetchone():
+        raise ValueError("Shipment is completed or awaiting its next review")
     shipment = get_source_shipment(shipment_id)
     if shipment is None:
         raise LookupError("Shipment not found")
@@ -251,7 +253,9 @@ def submit_task(conn, actor, task_id, evidence_source, review_note, route_change
     _require(conn, actor, ("operator",))
     with conn:
         cur = conn.execute("""UPDATE ops_tasks SET status='submitted',evidence_source=?,review_note=?,
-          route_changed=?,submitted_at=? WHERE id=? AND user_id=? AND status IN ('pending','rejected')""",
+          route_changed=?,submitted_at=? WHERE id=? AND user_id=? AND status IN ('pending','rejected')
+          AND EXISTS (SELECT 1 FROM ops_assignments a WHERE a.shipment_id=ops_tasks.shipment_id AND a.user_id=ops_tasks.user_id AND a.active=1)
+          AND NOT EXISTS (SELECT 1 FROM ops_followup f WHERE f.shipment_id=ops_tasks.shipment_id AND (f.state='completed' OR julianday(f.next_check_at)>julianday('now')))""",
           (evidence_source.strip(), review_note.strip(), int(route_changed), now_utc(), task_id, actor))
         if cur.rowcount != 1:
             raise ValueError("Task not assigned or already submitted")
