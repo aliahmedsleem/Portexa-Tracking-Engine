@@ -658,7 +658,7 @@ def home():
                     continue
                 if task["status"] not in ("pending", "rejected") or sid in seen:
                     continue
-                if record["update_count"] and followup.utcnow() < followup.parse(record["last_updated_at"]) + followup.INTERVAL:
+                if (record["update_count"] and followup.parse(record["assigned_at"]) <= followup.parse(record["last_updated_at"]) and followup.utcnow() < followup.parse(record["last_updated_at"]) + followup.INTERVAL):
                     continue
                 seen.add(sid)
                 visible.append(task)
