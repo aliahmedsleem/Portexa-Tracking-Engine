@@ -34,6 +34,8 @@ def source_eligible_ids():
 
 def distribution_preview(conn, source_ids=None):
     ids = source_eligible_ids() if source_ids is None else sorted(set(map(int, source_ids)))
+    blocked = {int(r[0]) for r in conn.execute("SELECT shipment_id FROM ops_followup WHERE state='completed' OR julianday(next_check_at)>julianday('now')")}
+    ids = [sid for sid in ids if sid not in blocked]
     users = [dict(r) for r in conn.execute(
         "SELECT id,full_name,phone FROM ops_users WHERE role='operator' AND active=1 ORDER BY id")]
     assigned = {int(r["shipment_id"]):int(r["user_id"]) for r in conn.execute(
@@ -65,6 +67,8 @@ def distribute(conn, actor, source_ids=None):
                 "INSERT OR IGNORE INTO ops_assignments(shipment_id,user_id,active,assigned_at) VALUES(?,?,1,?)",
                 (sid,uid,now_utc()))
             if cur.rowcount == 1:
+                conn.execute("INSERT INTO ops_notifications(user_id,title,body,created_at) VALUES(?,?,?,?)",
+                             (uid,"بوليصة مسندة جديدة",f"تم إسناد الشحنة #{sid} إليك",now_utc()))
                 audit(conn,actor,"shipment.auto_assigned","shipment",sid,"user_id="+str(uid))
         if plan["plan"]:
             audit(conn,actor,"distribution.completed","assignment",None,
