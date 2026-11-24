@@ -57,6 +57,7 @@ a{color:var(--gold);text-decoration:none}a:hover{text-decoration:underline}
 main{max-width:1500px;margin:0 auto;padding:clamp(16px,2.5vw,36px);min-width:0}
 h2{font-size:20px;color:#f2d39b;margin:0 0 18px}h3{font-size:16px;margin:0 0 10px}
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:clamp(16px,2vw,24px);margin:0 0 18px;box-shadow:0 10px 28px #0002;min-width:0}
+.dashboard-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin-bottom:16px}.dashboard-grid .panel{margin:0;min-width:0}.dashboard-grid strong{font-size:1.35rem}@media(max-width:1100px){.dashboard-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:480px){.dashboard-grid{grid-template-columns:1fr}}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:16px}
 label{display:block;margin:0 0 16px;font-size:14px;color:#c8d7e6}
 input,select,textarea{display:block;width:100%;min-height:44px;margin-top:7px;padding:11px 13px;border-radius:9px;border:1px solid #49657e;background:#091c2e;color:#fff;font:inherit}
@@ -275,7 +276,7 @@ def home():
                 tasks = [t for t in tasks if t.get("shipment") and valid_bill_of_lading(t["shipment"].get("bol_no"))]
             elif bol_filter == "without":
                 tasks = [t for t in tasks if t.get("shipment") and not valid_bill_of_lading(t["shipment"].get("bol_no"))]
-            return page("""<section class="panel"><h2>البوالص المسندة إليّ</h2><div class="grid"><div>المستحقات الكلية: {{ earnings }} د.ع</div><div>المدفوع: {{ paid }} د.ع</div><div>الرصيد غير المدفوع: {{ earnings-paid }} د.ع</div></div>
+            return page("""<section class="panel"><h2>البوالص المسندة إليّ</h2><div class="grid"><section class="panel"><h3>المستحقات الكلية</h3><strong>{{ "{:,}".format(earnings) }} د.ع</strong></section><section class="panel"><h3>المدفوع</h3><strong>{{ "{:,}".format(paid) }} د.ع</strong></section><section class="panel"><h3>الرصيد غير المدفوع</h3><strong>{{ "{:,}".format(earnings-paid) }} د.ع</strong></section></div>
 <form method="get" action="{{ url_for('home') }}">
 <label>فلترة الشحنات حسب رقم بوليصة الشحن
 <select name="bol_filter" onchange="this.form.submit()">
@@ -367,23 +368,28 @@ def home():
             int(row["shipment_id"]) in valid_source_ids for row in active_assignments
         )
         unassigned_valid_count = len(valid_source_ids - valid_assigned_ids)
+        waiting_ids = {int(r[0]) for r in conn.execute("SELECT shipment_id FROM ops_followup WHERE state='waiting' AND julianday(next_check_at)>julianday('now')")} & valid_source_ids
+        working_ids = {int(r[0]) for r in conn.execute("SELECT DISTINCT shipment_id FROM ops_tasks WHERE status IN ('pending','rejected')")} & valid_assigned_ids - waiting_ids
+        earned_total = conn.execute("SELECT COALESCE(SUM(price_iqd),0) FROM ops_tasks WHERE status='approved'").fetchone()[0]
+        paid_total = conn.execute("SELECT COALESCE(SUM(amount_iqd),0) FROM ops_payments").fetchone()[0]
         stats = ops.dashboard_stats(conn, u["id"])
+        stats.update(waiting=len(waiting_ids), completed=len(completed_ids), working=len(working_ids), balance=earned_total-paid_total)
         stats["assignments"] = len(valid_assigned_ids)
         stats["invalid_assignments"] = invalid_assignment_count
         stats["unassigned_valid"] = unassigned_valid_count
         users = [dict(r) for r in conn.execute("SELECT id,full_name,phone,username,role,active FROM ops_users ORDER BY id")]
         assignments = [a for a in dist.assignment_history(conn) if a["active"] and int(a["shipment_id"]) in valid_source_ids]
         pending = [dict(r) for r in conn.execute("SELECT t.id,t.shipment_id,t.user_id,t.review_note,t.evidence_source,t.route_changed FROM ops_tasks t WHERE t.status='submitted' ORDER BY t.id LIMIT 100")]
-        return page("""<div class="grid">
-<section class="panel"><h3>بوالص مستحقة لإعادة المتابعة</h3><strong>{{ due_count }}</strong></section><section class="panel"><h3>المستخدمون</h3><strong>{{ stats.users }}</strong></section>
+        return page("""<div class="dashboard-grid">
+<section class="panel"><h3>بوالص مؤجلة</h3><strong>{{ stats.waiting }}</strong></section><section class="panel"><h3>بوالص مكتملة نهائياً</h3><strong>{{ stats.completed }}</strong></section><section class="panel"><h3>بوالص قيد العمل</h3><strong>{{ stats.working }}</strong></section><section class="panel"><h3>بوالص مستحقة لإعادة المتابعة</h3><strong>{{ due_count }}</strong></section><section class="panel"><h3>المستخدمون</h3><strong>{{ stats.users }}</strong></section>
 <section class="panel"><h3>البوالص المسندة الصالحة</h3><strong>{{ stats.assignments }}</strong></section>
 <section class="panel"><h3>بوالص صالحة غير مسندة</h3><strong>{{ stats.unassigned_valid }}</strong></section>\n<section class="panel"><h3>إسنادات قديمة أو غير صالحة</h3><strong>{{ stats.invalid_assignments }}</strong></section>\n<section class="panel"><h3>نسبة الاعتماد</h3><strong>{{ stats.approval_rate }}%</strong></section>
-<section class="panel"><h3>بانتظار المراجعة</h3><strong>{{ stats.tasks.get('submitted',0) }}</strong></section></div>
+<section class="panel"><h3>بانتظار المراجعة</h3><strong>{{ stats.tasks.get('submitted',0) }}</strong></section><section class="panel"><h3>المستحقات غير المدفوعة</h3><strong>{{ "{:,}".format(stats.balance) }} د.ع</strong></section><section class="panel"><h3>إجمالي البوالص الصالحة</h3><strong>{{ stats.assignments + stats.unassigned_valid }}</strong></section></div>
 <section class="panel"><h2>إدارة المستخدمين</h2><p class="muted">عرض حسابات الموظفين وتفاصيلهم وتعديلها من صفحة مستقلة.</p><a href="{{ url_for('users_page') }}">فتح إدارة المستخدمين</a></section>
 <section class="panel"><h2>التوزيع التلقائي العادل</h2>
 <p class="muted">تُسند البوالص الجديدة تلقائياً إلى الموظفين الأقل حملاً، وتبقى الإسنادات السابقة محفوظة.</p>
 <p><a href="{{ url_for('distribution_preview_page') }}">معاينة توزيع البوالص والأحمال قبل التنفيذ</a> · <a href="{{ url_for('source_statuses_page') }}">فحص حالات الشحنات الأصلية</a></p>
-<form method="post" action="{{ url_for('auto_distribute') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button>توزيع البوالص الجديدة تلقائياً</button></form></section>
+<form method="post" action="{{ url_for('auto_distribute') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button>توزيع البوالص الجديدة والمستحقة</button></form></section>
 <section class="panel"><h2>البوالص المسندة وسجل العمل</h2><div class="scroll">
 <table><tr><th>البوليصة / الشحنة</th><th>الموظف المسؤول</th><th>عدد المراجعات</th><th>المعتمدة</th><th>آخر إرسال</th><th>التفاصيل</th></tr>
 {% for a in assignments %}<tr><td>#{{ a.shipment_id }}</td><td>{{ a.operator_name }}</td>
