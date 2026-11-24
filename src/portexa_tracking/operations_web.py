@@ -14,6 +14,7 @@ from flask import Flask, abort, flash, redirect, render_template_string, request
 from markupsafe import escape
 from portexa_tracking.database import connect
 from portexa_tracking import operations as ops
+from portexa_tracking import operations_followup as followup
 from portexa_tracking import operations_distribution as dist
 from portexa_tracking import operations_assignment_admin as assignment_admin
 from portexa_tracking.operations_scheduler import preview as cycle_preview
@@ -530,6 +531,8 @@ BASE = """<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><
 def db():
     conn = connect()
     ops.init_operations(conn)
+    followup.init(conn)
+    conn.commit()
     return conn
 
 
@@ -659,7 +662,7 @@ def home():
                         task["can_edit"] = True
                         task["snapshot"] = snapshot_token(task["id"], task["shipment"])
                         task["bundle_snapshot"] = snapshot_signer().dumps({"task_id":task["id"],"values":{k:task["shipment"][k] for k in edit.FIELDS},"containers":task["containers"]})
-                except (OSError, ValueError, RuntimeError, PermissionError) as exc:
+                except (OSError, ValueError, RuntimeError, PermissionError, LookupError) as exc:
                     task["shipment"] = None
                     task["source_error"] = "تعذر قراءة بيانات الشحنة"
             bol_filter = request.args.get("bol_filter", "with")
