@@ -247,6 +247,8 @@ def home():
     with db() as conn:
         if u["role"] == "operator":
             tasks = ops.my_tasks(conn, u["id"])
+            earnings = conn.execute("SELECT COALESCE(SUM(price_iqd),0) FROM ops_tasks WHERE user_id=? AND status='approved'", (u["id"],)).fetchone()[0]
+            paid = conn.execute("SELECT COALESCE(SUM(amount_iqd),0) FROM ops_payments WHERE user_id=?", (u["id"],)).fetchone()[0]
             for task in tasks:
                 try:
                     task["shipment"] = get_source_shipment(task["shipment_id"])
@@ -273,7 +275,7 @@ def home():
                 tasks = [t for t in tasks if t.get("shipment") and valid_bill_of_lading(t["shipment"].get("bol_no"))]
             elif bol_filter == "without":
                 tasks = [t for t in tasks if t.get("shipment") and not valid_bill_of_lading(t["shipment"].get("bol_no"))]
-            return page("""<section class="panel"><h2>البوالص المسندة إليّ</h2>
+            return page("""<section class="panel"><h2>البوالص المسندة إليّ</h2><div class="grid"><div>المستحقات الكلية: {{ earnings }} د.ع</div><div>المدفوع: {{ paid }} د.ع</div><div>الرصيد غير المدفوع: {{ earnings-paid }} د.ع</div></div>
 <form method="get" action="{{ url_for('home') }}">
 <label>فلترة الشحنات حسب رقم بوليصة الشحن
 <select name="bol_filter" onchange="this.form.submit()">
@@ -344,8 +346,8 @@ def home():
 <label>نتيجة المراجعة<select name="changed">
 <option value="0">تم التحقق — لا يوجد تغيير</option>
 <option value="1">تم تحديث بيانات الشحنة</option></select></label>
-<button>إرسال للمراجعة</button></form>{% endif %}</section>
-{% else %}<section class="panel">لا توجد مهام حالياً</section>{% endfor %}""",tasks=tasks,route_labels=ROUTE_LABELS,movement_labels=[(k,v) for k,v in ROUTE_LABELS if k!="container_number"],bol_filter=bol_filter,all_count=all_count,with_bol=with_bol,without_bol=without_bol)
+<label>حالة المتابعة<select name="completed"><option value="0">إعادة المتابعة بعد 72 ساعة</option><option value="1">تأكيد وصول جميع الحاويات إلى الميناء النهائي</option></select></label><button>إرسال للمراجعة</button></form>{% endif %}</section>
+{% else %}<section class="panel">لا توجد مهام حالياً</section>{% endfor %}""",tasks=tasks,earnings=earnings,paid=paid,route_labels=ROUTE_LABELS,movement_labels=[(k,v) for k,v in ROUTE_LABELS if k!="container_number"],bol_filter=bol_filter,all_count=all_count,with_bol=with_bol,without_bol=without_bol)
         # Audit active assignments against the current read-only Portexa source.
         from portexa_tracking.portexa_bridge import source_connection, check_schema
         with source_connection() as source:
@@ -353,8 +355,11 @@ def home():
             valid_source_ids = {int(row["id"]) for row in source.execute(
                 "SELECT id,bol_no FROM shipment"
             ) if valid_bill_of_lading(row["bol_no"])}
+        completed_ids = {int(r[0]) for r in conn.execute("SELECT shipment_id FROM ops_followup WHERE state='completed'")}
+        valid_source_ids -= completed_ids
+        due_count = conn.execute("SELECT COUNT(*) FROM ops_followup WHERE state='waiting' AND julianday(next_check_at)<=julianday('now') AND NOT EXISTS (SELECT 1 FROM ops_tasks t WHERE t.shipment_id=ops_followup.shipment_id AND t.status IN ('pending','submitted','rejected'))").fetchone()[0]
         active_assignments = [dict(row) for row in conn.execute(
-            "SELECT shipment_id,user_id FROM ops_assignments WHERE active=1"
+            "SELECT shipment_id,user_id FROM ops_assignments WHERE active=1 AND shipment_id NOT IN (SELECT shipment_id FROM ops_followup WHERE state='completed')"
         )]
         valid_assigned_ids = {int(row["shipment_id"]) for row in active_assignments
                               if int(row["shipment_id"]) in valid_source_ids}
@@ -370,7 +375,7 @@ def home():
         assignments = [a for a in dist.assignment_history(conn) if a["active"] and int(a["shipment_id"]) in valid_source_ids]
         pending = [dict(r) for r in conn.execute("SELECT t.id,t.shipment_id,t.user_id,t.review_note,t.evidence_source,t.route_changed FROM ops_tasks t WHERE t.status='submitted' ORDER BY t.id LIMIT 100")]
         return page("""<div class="grid">
-<section class="panel"><h3>المستخدمون</h3><strong>{{ stats.users }}</strong></section>
+<section class="panel"><h3>بوالص مستحقة لإعادة المتابعة</h3><strong>{{ due_count }}</strong></section><section class="panel"><h3>المستخدمون</h3><strong>{{ stats.users }}</strong></section>
 <section class="panel"><h3>البوالص المسندة الصالحة</h3><strong>{{ stats.assignments }}</strong></section>
 <section class="panel"><h3>بوالص صالحة غير مسندة</h3><strong>{{ stats.unassigned_valid }}</strong></section>\n<section class="panel"><h3>إسنادات قديمة أو غير صالحة</h3><strong>{{ stats.invalid_assignments }}</strong></section>\n<section class="panel"><h3>نسبة الاعتماد</h3><strong>{{ stats.approval_rate }}%</strong></section>
 <section class="panel"><h3>بانتظار المراجعة</h3><strong>{{ stats.tasks.get('submitted',0) }}</strong></section></div>
@@ -395,7 +400,7 @@ def home():
 {% if user.role=='admin' %}<section class="panel"><h2>سعر المراجعة المعتمدة</h2><form method="post" action="{{ url_for('price') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><label>د.ع لكل مراجعة<input type="number" min="0" max="10000000" name="amount" required></label><button>حفظ السعر للدورات القادمة</button></form></section>{% endif %}
 <section class="panel"><h2>إرسال إشعار</h2><form method="post" action="{{ url_for('send_notice') }}"><input type="hidden" name="csrf" value="{{ csrf }}">
 <label>المستخدم<select name="user_id">{% for x in users if x.active %}<option value="{{ x.id }}">{{ x.full_name }}</option>{% endfor %}</select></label>
-<label>العنوان<input name="title" required></label><label>الرسالة<textarea name="body" required></textarea></label><button>إرسال</button></form></section>""", stats=stats, users=users, pending=pending, assignments=assignments)
+<label>العنوان<input name="title" required></label><label>الرسالة<textarea name="body" required></textarea></label><button>إرسال</button></form></section>""", stats=stats, users=users, pending=pending, assignments=assignments,due_count=due_count)
 
 
 @app.post("/tasks/<int:task_id>/bundle/save")
@@ -707,7 +712,7 @@ def assign_task():
 @app.post("/tasks/<int:task_id>/submit")
 @require("operator")
 def submit(task_id):
-    return action(lambda c,a: ops.submit_task(c,a,task_id,request.form["source"],request.form["note"],request.form["changed"]=="1"))
+    return action(lambda c,a: ops.submit_task(c,a,task_id,request.form["source"],request.form["note"],request.form["changed"]=="1",request.form.get("completed")=="1"))
 
 
 @app.post("/tasks/<int:task_id>/decision")
