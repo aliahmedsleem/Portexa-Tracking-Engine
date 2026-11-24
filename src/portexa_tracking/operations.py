@@ -286,6 +286,14 @@ def decide_task(conn, actor, task_id, approve, reason=""):
                 state=excluded.state,next_check_at=excluded.next_check_at,task_id=excluded.task_id,updated_at=excluded.updated_at
                 WHERE ops_followup.state!='completed'""",
                 (row["shipment_id"], "completed" if completed else "waiting", due, task_id, now_utc()))
+            # Keep existing follow-up records consistent with the approved lifecycle.
+            if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='ops_followups'").fetchone():
+                conn.execute("""UPDATE ops_followups SET status=?, last_updated_at=?,
+                    completed_at=CASE WHEN ? THEN ? ELSE completed_at END,
+                    completed_by=CASE WHEN ? THEN ? ELSE completed_by END
+                    WHERE shipment_id=? AND status='active'""",
+                    ("completed" if completed else "active", now_utc(),
+                     completed, now_utc(), completed, actor, row["shipment_id"]))
         audit(conn, actor, "task."+status, "task", task_id, reason[:500])
 
 
