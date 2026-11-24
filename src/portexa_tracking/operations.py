@@ -23,6 +23,13 @@ def now_utc():
 
 def init_operations(conn):
     conn.executescript("""
+    CREATE TABLE IF NOT EXISTS ops_followup(
+      shipment_id INTEGER PRIMARY KEY,
+      state TEXT NOT NULL CHECK(state IN ('waiting','completed')),
+      next_check_at TEXT,
+      task_id INTEGER NOT NULL,
+      updated_at TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS ops_users(
       id INTEGER PRIMARY KEY, full_name TEXT NOT NULL, phone TEXT NOT NULL,
       username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL,
@@ -219,8 +226,12 @@ def generate_tasks(conn, when=None, eligible_ids=None):
         query = """INSERT OR IGNORE INTO ops_tasks(shipment_id,cycle_at,user_id,price_iqd,created_at)
           SELECT a.shipment_id, ?, a.user_id, ?, ?
           FROM ops_assignments a JOIN ops_users u ON u.id=a.user_id
-          WHERE a.active=1 AND u.active=1"""
-        params = [slot, price, now_utc()]
+          WHERE a.active=1 AND u.active=1
+          AND NOT EXISTS (SELECT 1 FROM ops_followup f WHERE f.shipment_id=a.shipment_id
+            AND (f.state='completed' OR julianday(f.next_check_at)>julianday(?)))
+          AND NOT EXISTS (SELECT 1 FROM ops_tasks t WHERE t.shipment_id=a.shipment_id
+            AND t.status IN ('pending','submitted','rejected'))"""
+        params = [slot, price, now_utc(), (when or datetime.now(timezone.utc)).isoformat()]
         if ids is not None:
             query += " AND a.shipment_id IN (" + ",".join("?" for _ in ids) + ")"
             params.extend(ids)
@@ -228,7 +239,9 @@ def generate_tasks(conn, when=None, eligible_ids=None):
         return conn.total_changes - before
 
 
-def submit_task(conn, actor, task_id, evidence_source, review_note, route_changed):
+def submit_task(conn, actor, task_id, evidence_source, review_note, route_changed, completed=False):
+    if type(completed) is not bool:
+        raise ValueError("Invalid completion flag")
     if not evidence_source or not evidence_source.strip() or len(evidence_source) > 500:
         raise ValueError("Review evidence/source required")
     if not review_note or not review_note.strip() or len(review_note) > 2000:
@@ -242,6 +255,8 @@ def submit_task(conn, actor, task_id, evidence_source, review_note, route_change
           (evidence_source.strip(), review_note.strip(), int(route_changed), now_utc(), task_id, actor))
         if cur.rowcount != 1:
             raise ValueError("Task not assigned or already submitted")
+        conn.execute("INSERT INTO ops_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                     ("task_completion:"+str(task_id), str(int(completed))))
         audit(conn, actor, "task.submitted", "task", task_id)
 
 
@@ -250,7 +265,7 @@ def decide_task(conn, actor, task_id, approve, reason=""):
     if type(approve) is not bool or (not approve and not reason.strip()):
         raise ValueError("Rejection requires a reason")
     with conn:
-        row = conn.execute("SELECT user_id FROM ops_tasks WHERE id=? AND status='submitted'", (task_id,)).fetchone()
+        row = conn.execute("SELECT user_id,shipment_id FROM ops_tasks WHERE id=? AND status='submitted'", (task_id,)).fetchone()
         if row is None:
             raise ValueError("Task is not awaiting review")
         status = "approved" if approve else "rejected"
@@ -258,6 +273,15 @@ def decide_task(conn, actor, task_id, approve, reason=""):
                      (status, now_utc() if approve else None, actor if approve else None, task_id))
         conn.execute("INSERT INTO ops_notifications(user_id,title,body,created_at) VALUES(?,?,?,?)",
                      (row["user_id"], "نتيجة مراجعة المهمة", "تم اعتماد المهمة" if approve else "تم رفض المهمة: "+reason[:500], now_utc()))
+        if approve:
+            flag = conn.execute("SELECT value FROM ops_settings WHERE key=?", ("task_completion:"+str(task_id),)).fetchone()
+            completed = bool(flag and flag[0] == "1")
+            due = None if completed else (datetime.now(timezone.utc)+timedelta(hours=72)).isoformat(timespec="seconds")
+            conn.execute("""INSERT INTO ops_followup(shipment_id,state,next_check_at,task_id,updated_at)
+                VALUES(?,?,?,?,?) ON CONFLICT(shipment_id) DO UPDATE SET
+                state=excluded.state,next_check_at=excluded.next_check_at,task_id=excluded.task_id,updated_at=excluded.updated_at
+                WHERE ops_followup.state!='completed'""",
+                (row["shipment_id"], "completed" if completed else "waiting", due, task_id, now_utc()))
         audit(conn, actor, "task."+status, "task", task_id, reason[:500])
 
 
@@ -302,7 +326,7 @@ def dashboard_stats(conn, actor):
 
 def my_tasks(conn, actor, limit=100):
     _require(conn, actor, ("operator",))
-    return [dict(r) for r in conn.execute("SELECT * FROM ops_tasks WHERE user_id=? ORDER BY cycle_at DESC,id DESC LIMIT ?",
+    return [dict(r) for r in conn.execute("SELECT * FROM ops_tasks WHERE user_id=? AND status IN ('pending','rejected') AND NOT EXISTS (SELECT 1 FROM ops_followup f WHERE f.shipment_id=ops_tasks.shipment_id AND (f.state='completed' OR julianday(f.next_check_at)>julianday('now'))) ORDER BY cycle_at DESC,id DESC LIMIT ?",
                                          (actor, min(max(int(limit),1),500)))]
 
 
