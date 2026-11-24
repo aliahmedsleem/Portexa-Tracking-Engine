@@ -6,6 +6,7 @@ Run at 00,06,12,18 Asia/Baghdad via a dedicated scheduler service/timer.
 import argparse
 from datetime import datetime, timezone
 from portexa_tracking.database import connect
+from portexa_tracking import operations_followup as followup
 from portexa_tracking.operations import init_operations, generate_tasks, cycle_start
 from portexa_tracking.operations_distribution import source_eligible_ids, source_status_summary, distribute
 
@@ -22,6 +23,26 @@ def eligible_assignments(conn):
            JOIN ops_users u ON u.id=a.user_id
            WHERE a.active=1 AND u.active=1 AND u.role='operator'""")]
     return sorted(set(assigned) & active_source), sorted(set(assigned) - active_source)
+
+
+def sync_followups(conn, eligible_ids):
+    """Backfill missing follow-ups without reopening or replacing existing records."""
+    followup.init(conn)
+    eligible = set(eligible_ids)
+    now = followup.stamp()
+    created = 0
+    with conn:
+        for row in conn.execute("""SELECT a.shipment_id,a.user_id
+            FROM ops_assignments a JOIN ops_users u ON u.id=a.user_id
+            WHERE a.active=1 AND u.active=1 AND u.role='operator'""").fetchall():
+            if row["shipment_id"] not in eligible:
+                continue
+            cur = conn.execute("""INSERT OR IGNORE INTO ops_followups
+                (shipment_id,user_id,status,assigned_at,last_updated_at)
+                VALUES (?,?,'active',?,?)""",
+                (row["shipment_id"],row["user_id"],now,now))
+            created += cur.rowcount
+    return created
 
 
 def preview(conn, when=None):
@@ -64,6 +85,8 @@ def main():
         if args.apply:
             # Recheck source before commit; never generate from unverified IDs.
             active,_=eligible_assignments(conn)
+            print("Follow-ups created:", sync_followups(conn, active))
+            active = [sid for sid in active if (followup.get(conn, sid) or {}).get('status') == 'active']
             created=generate_tasks(conn,eligible_ids=active)
             print("Created:",created)
         else:
