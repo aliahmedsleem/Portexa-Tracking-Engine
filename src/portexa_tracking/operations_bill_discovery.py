@@ -55,6 +55,15 @@ def scan(conn, initialize_only=False):
                      f"شحنة #{shipment_id} | البوليصة: {bol_no} | الفاتورة: {invoice_no or 'غير مسجلة'}",
                      now_utc()))
                 notifications += 1
+        for due in conn.execute("""SELECT shipment_id,task_id FROM ops_followup f WHERE state='waiting'
+            AND julianday(next_check_at)<=julianday('now')
+            AND NOT EXISTS (SELECT 1 FROM ops_tasks t WHERE t.shipment_id=f.shipment_id AND t.status IN ('pending','submitted','rejected'))""").fetchall():
+            key = "followup_notice:"+str(due["task_id"])
+            if conn.execute("INSERT OR IGNORE INTO ops_settings(key,value) VALUES(?, '1')",(key,)).rowcount:
+                for manager in conn.execute("SELECT id FROM ops_users WHERE active=1 AND role IN ('admin','supervisor')").fetchall():
+                    conn.execute("INSERT INTO ops_notifications(user_id,title,body,created_at) VALUES(?,?,?,?)",
+                        (manager["id"],"إعادة متابعة مستحقة",f"الشحنة #{due['shipment_id']} مستحقة لإعادة التحقق",now_utc()))
+                    notifications += 1
         conn.execute("""INSERT INTO ops_settings(key,value)
             VALUES('bill_discovery_initialized','1')
             ON CONFLICT(key) DO UPDATE SET value='1'""")
