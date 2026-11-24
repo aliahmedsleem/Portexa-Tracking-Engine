@@ -591,7 +591,7 @@ def token():
 @app.before_request
 def protect():
     if request.method in ("POST", "PUT", "PATCH", "DELETE"):
-        if not secrets.compare_digest(str(request.form.get("csrf", "")), str(session.get("csrf", ""))):
+        if not session.get("csrf") or not secrets.compare_digest(str(request.form.get("csrf", "")), str(session.get("csrf", ""))):
             abort(403)
 
 
@@ -810,7 +810,7 @@ def home():
 {% else %}<p class="muted">لا توجد تحديثات تنتظر الاعتماد.</p>{% endfor %}</section>
 {% if user.role=='admin' %}<section class="panel"><h2>سعر المراجعة المعتمدة</h2><form method="post" action="{{ url_for('price') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><label>د.ع لكل مراجعة<input type="number" min="0" max="10000000" name="amount" required></label><button>حفظ السعر للدورات القادمة</button></form></section>{% endif %}
 <section class="panel"><h2>إرسال إشعار</h2><form method="post" action="{{ url_for('send_notice') }}"><input type="hidden" name="csrf" value="{{ csrf }}">
-<label>المستخدم<select name="user_id">{% for x in users if x.active %}<option value="{{ x.id }}">{{ x.full_name }}</option>{% endfor %}</select></label>
+<label>المستخدم<select name="user_id"><option value="all">جميع المستخدمين</option><option value="operators">جميع الموظفين</option><option value="managers">الإدارة والمشرفون</option>{% for x in users if x.active %}<option value="{{ x.id }}">{{ x.full_name }}</option>{% endfor %}</select></label>
 <label>العنوان<input name="title" required></label><label>الرسالة<textarea name="body" required></textarea></label><button>إرسال</button></form></section>""", stats=stats, users=users, pending=pending, assignments=assignments)
 
 
@@ -1354,8 +1354,22 @@ def price():
 def send_notice():
     try:
         with db() as conn:
-            ops.notify(conn,current_user()["id"],int(request.form["user_id"]),
-                       request.form["title"],request.form["body"])
+            target = request.form["user_id"]
+            title = request.form["title"].strip()
+            body = request.form["body"].strip()
+            if not title or not body or len(title)>200 or len(body)>4000:
+                raise ValueError("Invalid notification")
+            groups = {"all": ("admin","supervisor","operator"),
+                      "operators": ("operator",), "managers": ("admin","supervisor")}
+            if target in groups:
+                roles = groups[target]
+                ids = [r[0] for r in conn.execute(
+                    "SELECT id FROM ops_users WHERE active=1 AND role IN ("+
+                    ",".join("?" for _ in roles)+")",roles)]
+            else:
+                ids = [int(target)]
+            for uid in ids:
+                ops.notify(conn,current_user()["id"],uid,title,body)
         flash("تم إرسال الإشعار")
     except (ValueError,LookupError,PermissionError) as exc:
         flash("تعذر إرسال الإشعار: "+str(exc))
