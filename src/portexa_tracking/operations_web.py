@@ -10,7 +10,7 @@ from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 from portexa_tracking import operations_shipment_edit as edit
 from portexa_tracking import manual_routes as routes
 from portexa_tracking.portexa_bridge import get_source_shipment, read_container_movements, read_container_history, save_shipment_bundle, MOVEMENT_FIELDS, valid_bill_of_lading
-from flask import Flask, abort, flash, redirect, render_template_string, request, session, url_for
+from flask import Response, jsonify, Flask, abort, flash, redirect, render_template_string, request, session, url_for
 from markupsafe import escape
 from portexa_tracking.database import connect
 from portexa_tracking import operations as ops
@@ -94,7 +94,7 @@ main{padding:14px}.panel{margin-bottom:12px}.grid{gap:10px}table{min-width:550px
 @media(prefers-reduced-motion:reduce){.sidebar,.mobile-backdrop{transition:none}}
 .container-item{border:1px solid #456078;border-radius:12px;margin:14px 0;padding:16px;min-width:0}.container-item legend{color:#f2d39b;font-weight:700}.bundle-actions{display:flex;flex-wrap:wrap;gap:10px;margin:16px 0}.bundle-actions button,.remove-container{background:#273e51;color:#f2d39b;border:1px solid #4a6276}.bundle-save{width:100%;max-width:420px}</style>
 """
-BASE = """<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>PORTEXA Operations</title>""" + CSS + """</head><body>
+BASE = """<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>PORTEXA Operations</title><meta name="theme-color" content="#091522"><link rel="manifest" href="{{ url_for('pwa_manifest') }}"><script>if ("serviceWorker" in navigator) {window.addEventListener("load",()=>navigator.serviceWorker.register("{{ url_for('pwa_worker') }}").catch(()=>{}));}</script>""" + CSS + """</head><body>
 {% if user %}
 <input type="checkbox" id="nav-open" hidden aria-label="فتح القائمة الجانبية">
 <div class="app-shell">
@@ -638,7 +638,11 @@ p=plan,cycle=cycle,names={u["id"]:u["full_name"] for u in plan["users"]})
 @app.post("/auto-distribute")
 @require("admin","supervisor")
 def auto_distribute():
-    return action(lambda c,a: dist.distribute(c,a))
+    def run_distribution(c,a):
+        ids = dist.source_eligible_ids()
+        dist.distribute(c,a,source_ids=ids)
+        ops.generate_tasks(c,eligible_ids=ids)
+    return action(run_distribution)
 
 
 @app.get("/shipments/<int:shipment_id>/history")
@@ -820,13 +824,33 @@ def user_payroll(user_id):
 <p>المدفوع: {{ x.paid_iqd }} د.ع</p><p>المتبقي: {{ x.balance_iqd }} د.ع</p>
 {% if user.role=='admin' %}<form method="post" action="{{ url_for('pay',user_id=user_id) }}">
 <input type="hidden" name="csrf" value="{{ csrf }}"><label>المبلغ المدفوع<input type="number" name="amount" min="1" max="{{ x.balance_iqd }}" required></label>
-<label>ملاحظات<input name="note"></label><button>تسجيل الدفعة</button></form>{% endif %}</section>""",name=row["full_name"],x=amounts,user_id=user_id)
+<label>ملاحظات<input name="note"></label><button>تسجيل الدفعة</button>{% if x.balance_iqd > 0 %}<button type="submit" name="settle" value="1" formnovalidate>تسديد كامل الرصيد</button>{% endif %}</form>{% endif %}</section>""",name=row["full_name"],x=amounts,user_id=user_id)
 
 
 @app.post("/payroll/<int:user_id>/pay")
 @require("admin")
 def pay(user_id):
-    return action(lambda c,a: ops.record_payment(c,a,user_id,int(request.form["amount"]),request.form.get("note","")))
+    return action(lambda c,a: ops.record_payment(c,a,user_id,(ops.payroll(c,a,user_id)["balance_iqd"] if request.form.get("settle")=="1" else int(request.form["amount"])),request.form.get("note","")))
+
+
+@app.get("/manifest.webmanifest")
+def pwa_manifest():
+    return jsonify(name="PORTEXA Operations", short_name="PORTEXA", lang="ar", dir="rtl",
+                   start_url=url_for("home"), scope="/", display="standalone",
+                   background_color="#091522", theme_color="#091522",
+                   icons=[{"src":url_for("pwa_icon"),"sizes":"any","type":"image/svg+xml","purpose":"any"}])
+
+
+@app.get("/pwa-icon.svg")
+def pwa_icon():
+    return Response('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="96" fill="#091522"/><text x="256" y="350" text-anchor="middle" font-family="Arial,sans-serif" font-weight="bold" font-size="300" fill="#e8bf78">P</text></svg>', mimetype="image/svg+xml")
+
+
+@app.get("/service-worker.js")
+def pwa_worker():
+    # Network-only: never cache authenticated pages or shipment data.
+    return Response("self.addEventListener('install',()=>self.skipWaiting());self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));self.addEventListener('fetch',()=>{});",
+                    mimetype="application/javascript", headers={"Cache-Control":"no-store"})
 
 
 def main():
