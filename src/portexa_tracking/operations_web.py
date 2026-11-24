@@ -93,7 +93,7 @@ input[type="hidden"],input[hidden],#nav-open{display:none!important}\n.mobile-to
 main{padding:14px}.panel{margin-bottom:12px}.grid{gap:10px}table{min-width:550px}
 }
 @media(prefers-reduced-motion:reduce){.sidebar,.mobile-backdrop{transition:none}}
-.mobile-nav,.install-action{display:none}
+.notice-toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:20px}.notice-toolbar a{padding:9px 14px;border:1px solid var(--line);border-radius:9px}.notice-toolbar a.selected{background:#30465a;color:var(--gold)}.notice-toolbar form{margin-inline-start:auto}.notice-day{color:var(--muted);margin:18px 0 8px}.notice-item{display:flex;gap:12px;border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:10px;background:#102235}.notice-item.unread{border-inline-start:3px solid var(--gold);background:#1a3044}.notice-symbol{color:var(--gold);font-size:24px}.notice-content{min-width:0;flex:1;overflow-wrap:anywhere}.notice-content p{margin:6px 0}.notice-content form{margin-top:8px}.notice-content button{font-size:12px;background:#294257;color:var(--gold)}.notice-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--gold);margin-inline-start:8px}.nav-unread{background:var(--gold);color:#102235;border-radius:12px;padding:0 6px;font-size:11px!important}.mobile-nav,.install-action{display:none}
 @media(max-width:980px){
 .mobile-nav{display:flex;position:fixed;bottom:0;left:0;right:0;z-index:19;background:#102235;border-top:1px solid var(--line);padding:6px 8px calc(6px + env(safe-area-inset-bottom));justify-content:space-around;gap:4px}
 .mobile-nav a,.mobile-nav label{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:52px;margin:0;padding:4px;color:var(--muted);font-size:11px;text-align:center;border-radius:9px}
@@ -120,7 +120,7 @@ BASE = """<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><
   <div><div class="side-label">مساحة العمل</div><nav class="side-nav" aria-label="التنقل">
     <a href="{{ url_for('home') }}" class="{{ 'active' if request.path == url_for('home') else '' }}"><span class="nav-symbol" aria-hidden="true">▦</span>{{ 'مهامي وشحناتي' if user.role == 'operator' else 'لوحة التحكم' }}</a>
     {% if user.role in ('admin','supervisor') %}<a href="{{ url_for('users_page') }}" class="{{ 'active' if request.path.startswith('/users') else '' }}"><span class="nav-symbol" aria-hidden="true">♙</span>إدارة المستخدمين</a>{% endif %}\n    {% if user.role in ('admin','supervisor') %}<a href="{{ url_for('assignment_management') }}" class="{{ 'active' if request.path.startswith('/assignments/manage') else '' }}"><span class="nav-symbol">▤</span>إدارة الإسنادات</a>{% endif %}
-    <a href="{{ url_for('notifications') }}" class="{{ 'active' if request.path == url_for('notifications') else '' }}"><span class="nav-symbol" aria-hidden="true">◉</span>الإشعارات</a>
+    <a href="{{ url_for('notifications') }}" class="{{ 'active' if request.path == url_for('notifications') else '' }}"><span class="nav-symbol" aria-hidden="true">◉</span>الإشعارات <span class="nav-unread" hidden></span></a>
     {% if user.role in ('admin','supervisor') %}
     <a href="{{ url_for('distribution_preview_page') }}" class="{{ 'active' if request.path == url_for('distribution_preview_page') else '' }}"><span class="nav-symbol" aria-hidden="true">⇄</span>معاينة التوزيع</a>
     <a href="{{ url_for('source_statuses_page') }}" class="{{ 'active' if request.path == url_for('source_statuses_page') else '' }}"><span class="nav-symbol" aria-hidden="true">≋</span>حالات الشحنات</a>
@@ -139,7 +139,7 @@ BASE = """<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><
 <nav class="mobile-nav" aria-label="التنقل على الهاتف">
 <a href="{{ url_for('home') }}" class="{{ 'active' if request.path == url_for('home') else '' }}"><span aria-hidden="true">▦</span>{{ 'مهامي' if user.role == 'operator' else 'الرئيسية' }}</a>
 {% if user.role in ('admin','supervisor') %}<a href="{{ url_for('assignment_management') }}"><span aria-hidden="true">▤</span>الإسنادات</a><a href="{{ url_for('distribution_preview_page') }}"><span aria-hidden="true">⇄</span>التوزيع</a>{% endif %}
-<a href="{{ url_for('notifications') }}" class="{{ 'active' if request.path == url_for('notifications') else '' }}"><span aria-hidden="true">◉</span>الإشعارات</a>
+<a href="{{ url_for('notifications') }}" class="{{ 'active' if request.path == url_for('notifications') else '' }}"><span aria-hidden="true">◉</span>الإشعارات <span class="nav-unread" hidden></span></a>
 <label for="nav-open"><span aria-hidden="true">☰</span>المزيد</label>
 </nav></div>
 {% else %}
@@ -149,6 +149,10 @@ BASE = """<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><
 </div></div>
 {% endif %}
 <script>
+{% if user %}
+async function refreshNoticeBadge(){if(document.hidden)return;try{const r=await fetch({{ url_for('notification_count')|tojson }},{cache:'no-store'});if(!r.ok)return;const d=await r.json();document.querySelectorAll('.nav-unread').forEach(b=>{b.textContent=d.unread>99?'99+':d.unread;b.hidden=!d.unread;});}catch(e){}}
+refreshNoticeBadge();setInterval(refreshNoticeBadge,15000);document.addEventListener('visibilitychange',refreshNoticeBadge);
+{% endif %}
 let installPrompt;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;document.querySelectorAll('.install-action').forEach(b=>b.hidden=false)});
 window.addEventListener('appinstalled',()=>{installPrompt=null;document.querySelectorAll('.install-action').forEach(b=>b.hidden=true)});
@@ -821,40 +825,38 @@ def mark_all_notifications_read():
 @app.get("/notifications")
 @require()
 def notifications():
+    from datetime import datetime, timedelta, timezone
     u = current_user()
+    unread_only = request.args.get("filter") == "unread"
     with db() as conn:
         rows = [dict(r) for r in conn.execute(
-            "SELECT * FROM ops_notifications WHERE user_id=? ORDER BY id DESC LIMIT 100",(u["id"],))]
+            "SELECT * FROM ops_notifications WHERE user_id=?" +
+            (" AND read_at IS NULL" if unread_only else "") +
+            " ORDER BY id DESC LIMIT 100", (u["id"],))]
         unread = conn.execute(
             "SELECT COUNT(*) FROM ops_notifications WHERE user_id=? AND read_at IS NULL",(u["id"],)).fetchone()[0]
-    return page("""<section class="panel"><h2>الإشعارات <span id="unread-count">({{ unread }} غير مقروء)</span></h2>
-<form method="post" action="{{ url_for('mark_all_notifications_read') }}">
-<input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit">تحديد الكل كمقروء</button></form>
-<p class="muted">تتحدث الصفحة تلقائياً عند وصول إشعارات جديدة.</p>
-{% for n in rows %}<div class="panel">
-<strong>{{ n.title }}{% if not n.read_at %} · جديد{% endif %}</strong>
-<p>{{ n.body }}</p><small>{{ n.created_at }}</small>
-{% if not n.read_at %}<form method="post" action="{{ url_for('mark_notification_read',notification_id=n.id) }}">
-<input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit">تحديد كمقروء</button></form>{% endif %}
-</div>{% else %}<p>لا توجد إشعارات</p>{% endfor %}</section>
+    tz = timezone(timedelta(hours=3))
+    today = datetime.now(tz).date()
+    for n in rows:
+        try:
+            dt = datetime.fromisoformat(n["created_at"])
+            dt = dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
+            dt = dt.astimezone(tz)
+            n["day"] = "اليوم" if dt.date()==today else "أمس" if dt.date()==today-timedelta(days=1) else dt.strftime("%Y-%m-%d")
+            n["time"] = dt.strftime("%H:%M")
+        except (ValueError, TypeError):
+            n["day"], n["time"] = "سابقاً", ""
+    return page("""<section class="panel"><h2>مركز الإشعارات <span id="unread-count">({{ unread }} غير مقروء)</span></h2>
+<div class="notice-toolbar"><a href="{{ url_for('notifications') }}" class="{{ 'selected' if not unread_only else '' }}">الكل</a><a href="{{ url_for('notifications',filter='unread') }}" class="{{ 'selected' if unread_only else '' }}">غير المقروءة</a>
+<form method="post" action="{{ url_for('mark_all_notifications_read') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit">قراءة الكل</button></form></div>
+{% for n in rows %}{% if loop.first or loop.previtem.day != n.day %}<h3 class="notice-day">{{ n.day }}</h3>{% endif %}
+<article class="notice-item {{ 'unread' if not n.read_at else '' }}"><span class="notice-symbol" aria-hidden="true">◉</span><div class="notice-content"><strong>{{ n.title }}</strong>{% if not n.read_at %}<span class="notice-dot" aria-label="غير مقروء"></span>{% endif %}<p>{{ n.body }}</p><small class="muted">{{ n.time }} · توقيت العراق</small>
+{% if not n.read_at %}<form method="post" action="{{ url_for('mark_notification_read',notification_id=n.id) }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit">تحديد كمقروء</button></form>{% endif %}</div></article>
+{% else %}<p class="muted">لا توجد إشعارات في هذا العرض.</p>{% endfor %}</section>
 <script>
-(function(){
 let previous={{ unread|tojson }};
-async function poll(){
-  if(document.hidden)return;
-  try{
-    const response=await fetch({{ url_for('notification_count')|tojson }},{cache:'no-store'});
-    if(!response.ok)return;
-    const data=await response.json();
-    if(data.unread>previous){location.reload();return;}
-    previous=data.unread;
-    const label=document.getElementById('unread-count');
-    if(label)label.textContent='('+data.unread+' غير مقروء)';
-  }catch(e){}
-}
-setInterval(poll,15000);
-})();
-</script>""",rows=rows,unread=unread)
+setInterval(async()=>{if(document.hidden)return;try{const r=await fetch({{ url_for('notification_count')|tojson }},{cache:'no-store'});if(r.ok){const d=await r.json();if(d.unread!==previous)location.reload();}}catch(e){}},15000);
+</script>""",rows=rows,unread=unread,unread_only=unread_only)
 
 
 @app.get("/payroll/<int:user_id>")
