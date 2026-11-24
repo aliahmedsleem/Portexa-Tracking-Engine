@@ -181,6 +181,11 @@ def assign(conn, actor, shipment_id, user_id):
         raise LookupError("Shipment not found")
     if not valid_bill_of_lading(shipment.get("bol_no")):
         raise ValueError("Shipment has no valid bill of lading")
+    from portexa_tracking import operations_followup as followup
+    followup.init(conn)
+    record = followup.get(conn, int(shipment_id))
+    if record and record["status"] == "completed":
+        raise ValueError("Completed follow-up must be explicitly reopened by an administrator")
     existing = conn.execute(
         "SELECT user_id FROM ops_assignments WHERE shipment_id=? AND active=1",
         (int(shipment_id),)).fetchone()
@@ -194,6 +199,20 @@ def assign(conn, actor, shipment_id, user_id):
         conn.execute("""INSERT INTO ops_assignments(shipment_id,user_id,assigned_at) VALUES(?,?,?)
           ON CONFLICT(shipment_id) DO UPDATE SET user_id=excluded.user_id,active=1,assigned_at=excluded.assigned_at""",
           (int(shipment_id), target["id"], now_utc()))
+        now = now_utc()
+        conn.execute("""INSERT INTO ops_followups
+          (shipment_id,user_id,status,assigned_at,last_updated_at)
+          VALUES(?,?,'active',?,?)
+          ON CONFLICT(shipment_id) DO UPDATE SET user_id=excluded.user_id,
+          assigned_at=excluded.assigned_at""",
+          (int(shipment_id), target["id"], now, now))
+        followup.event(conn, int(shipment_id), actor, "assigned", "user_id="+str(user_id))
+        price = int(conn.execute("SELECT value FROM ops_settings WHERE key='price_per_approved_review_iqd'").fetchone()[0])
+        conn.execute("""INSERT OR IGNORE INTO ops_tasks
+          (shipment_id,cycle_at,user_id,price_iqd,created_at) VALUES(?,?,?,?,?)""",
+          (int(shipment_id), datetime.now(timezone.utc).isoformat(timespec="microseconds"), target["id"], price, now))
+        conn.execute("INSERT INTO ops_notifications(user_id,title,body,created_at) VALUES(?,?,?,?)",
+          (target["id"], "إسناد بوليصة", "تم إسناد البوليصة " + str(shipment["bol_no"]), now))
         audit(conn, actor, "shipment.assigned", "shipment", shipment_id, "user_id="+str(user_id))
 
 
