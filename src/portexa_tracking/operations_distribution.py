@@ -4,7 +4,7 @@ Only reads the source database; never rewrites existing assignments or task hist
 """
 import os
 from collections import Counter
-from portexa_tracking.portexa_bridge import source_connection, check_schema
+from portexa_tracking.portexa_bridge import source_connection, check_schema, valid_bill_of_lading
 from portexa_tracking.operations import now_utc, audit
 
 TERMINAL = {"delivered","completed","cancelled","canceled","archived","closed",
@@ -28,12 +28,14 @@ def source_eligible_ids():
         raise ValueError("PORTEXA_OPS_ACTIVE_STATUSES must be configured after verifying source statuses")
     with source_connection() as source:
         check_schema(source)
-        return [int(row["id"]) for row in source.execute("SELECT id,status FROM shipment ORDER BY id")
-                if str(row["status"] or "").strip().casefold() in allowed]
+        return [int(row["id"]) for row in source.execute("SELECT id,status,bol_no FROM shipment ORDER BY id")
+                if str(row["status"] or "").strip().casefold() in allowed and valid_bill_of_lading(row["bol_no"])]
 
 
 def distribution_preview(conn, source_ids=None):
     ids = source_eligible_ids() if source_ids is None else sorted(set(map(int, source_ids)))
+    blocked = {int(r[0]) for r in conn.execute("SELECT shipment_id FROM ops_followup WHERE state='completed' OR julianday(next_check_at)>julianday('now')")}
+    ids = [sid for sid in ids if sid not in blocked]
     users = [dict(r) for r in conn.execute(
         "SELECT id,full_name,phone FROM ops_users WHERE role='operator' AND active=1 ORDER BY id")]
     assigned = {int(r["shipment_id"]):int(r["user_id"]) for r in conn.execute(
@@ -65,6 +67,8 @@ def distribute(conn, actor, source_ids=None):
                 "INSERT OR IGNORE INTO ops_assignments(shipment_id,user_id,active,assigned_at) VALUES(?,?,1,?)",
                 (sid,uid,now_utc()))
             if cur.rowcount == 1:
+                conn.execute("INSERT INTO ops_notifications(user_id,title,body,created_at) VALUES(?,?,?,?)",
+                             (uid,"بوليصة مسندة جديدة",f"تم إسناد الشحنة #{sid} إليك",now_utc()))
                 audit(conn,actor,"shipment.auto_assigned","shipment",sid,"user_id="+str(uid))
         if plan["plan"]:
             audit(conn,actor,"distribution.completed","assignment",None,

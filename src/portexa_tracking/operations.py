@@ -23,6 +23,13 @@ def now_utc():
 
 def init_operations(conn):
     conn.executescript("""
+    CREATE TABLE IF NOT EXISTS ops_followup(
+      shipment_id INTEGER PRIMARY KEY,
+      state TEXT NOT NULL CHECK(state IN ('waiting','completed')),
+      next_check_at TEXT,
+      task_id INTEGER NOT NULL,
+      updated_at TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS ops_users(
       id INTEGER PRIMARY KEY, full_name TEXT NOT NULL, phone TEXT NOT NULL,
       username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL,
@@ -58,6 +65,20 @@ def init_operations(conn):
       amount_iqd INTEGER NOT NULL CHECK(amount_iqd > 0),
       note TEXT, paid_at TEXT NOT NULL, recorded_by INTEGER NOT NULL REFERENCES ops_users(id)
     );
+    CREATE TABLE IF NOT EXISTS ops_shipment_change_log(
+      id INTEGER PRIMARY KEY,
+      task_id INTEGER NOT NULL REFERENCES ops_tasks(id),
+      shipment_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL REFERENCES ops_users(id),
+      original_values TEXT NOT NULL,
+      updated_values TEXT NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('pending','applied','failed','conflict')),
+      error_message TEXT,
+      created_at TEXT NOT NULL,
+      applied_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_ops_change_log_shipment
+      ON ops_shipment_change_log(shipment_id,created_at);
     CREATE TABLE IF NOT EXISTS ops_audit(
       id INTEGER PRIMARY KEY, actor_id INTEGER, action TEXT NOT NULL,
       target_type TEXT NOT NULL, target_id INTEGER, details TEXT, created_at TEXT NOT NULL
@@ -111,17 +132,73 @@ def create_user(conn, actor, full_name, phone, username, password, role="operato
         return cur.lastrowid
 
 
+def update_user(conn, actor, user_id, full_name, phone, username, role, active):
+    """Admin-only account edit; protect the last active admin."""
+    _require(conn, actor, ("admin",))
+    if (not all(isinstance(x, str) for x in (full_name, phone, username))
+            or not all((full_name.strip(), phone.strip(), username.strip()))
+            or any(len(x.strip()) > n for x, n in ((full_name, 120), (phone, 40), (username, 80)))
+            or role not in ROLES or type(active) is not bool):
+        raise ValueError("Invalid user details")
+    with conn:
+        target = conn.execute("SELECT id,role,active FROM ops_users WHERE id=?", (user_id,)).fetchone()
+        if target is None:
+            raise LookupError("User not found")
+        if target["role"] == "admin" and target["active"] and (role != "admin" or not active):
+            remaining = conn.execute(
+                "SELECT COUNT(*) FROM ops_users WHERE role='admin' AND active=1"
+            ).fetchone()[0]
+            if remaining <= 1:
+                raise ValueError("Cannot deactivate or demote the last active admin")
+        if user_id == actor and not active:
+            raise ValueError("Cannot deactivate your own account")
+        try:
+            conn.execute(
+                "UPDATE ops_users SET full_name=?,phone=?,username=?,role=?,active=? WHERE id=?",
+                (full_name.strip(), phone.strip(), username.strip(), role, int(active), user_id)
+            )
+        except sqlite3.IntegrityError as exc:
+            raise ValueError("Username already exists") from exc
+        audit(conn, actor, "user.updated", "user", user_id,
+              "role=" + role + ";active=" + str(int(active)))
+
+
+def reset_user_password(conn, actor, user_id, new_password):
+    """Replace password hash; never retrieve or audit plaintext passwords."""
+    _require(conn, actor, ("admin",))
+    password_hash = hash_password(new_password)
+    with conn:
+        if conn.execute("SELECT id FROM ops_users WHERE id=?", (user_id,)).fetchone() is None:
+            raise LookupError("User not found")
+        conn.execute("UPDATE ops_users SET password_hash=? WHERE id=?", (password_hash, user_id))
+        audit(conn, actor, "user.password.reset", "user", user_id)
+
+
 def authenticate(conn, username, password):
     row = conn.execute("SELECT * FROM ops_users WHERE username=? AND active=1", (username,)).fetchone()
     return dict(row) if row and verify_password(password, row["password_hash"]) else None
 
 
 def assign(conn, actor, shipment_id, user_id):
-    from portexa_tracking.portexa_bridge import get_source_shipment
+    from portexa_tracking.portexa_bridge import get_source_shipment, valid_bill_of_lading
     _require(conn, actor, ("admin", "supervisor"))
     target = _require(conn, user_id, ("operator",))
-    if get_source_shipment(shipment_id) is None:
+    if conn.execute("SELECT 1 FROM ops_followup WHERE shipment_id=? AND (state='completed' OR julianday(next_check_at)>julianday('now'))",(int(shipment_id),)).fetchone():
+        raise ValueError("Shipment is completed or awaiting its next review")
+    shipment = get_source_shipment(shipment_id)
+    if shipment is None:
         raise LookupError("Shipment not found")
+    if not valid_bill_of_lading(shipment.get("bol_no")):
+        raise ValueError("Shipment has no valid bill of lading")
+    existing = conn.execute(
+        "SELECT user_id FROM ops_assignments WHERE shipment_id=? AND active=1",
+        (int(shipment_id),)).fetchone()
+    if existing and int(existing["user_id"]) != int(user_id):
+        pending = conn.execute(
+            "SELECT COUNT(*) FROM ops_tasks WHERE shipment_id=? AND status IN ('pending','submitted')",
+            (int(shipment_id),)).fetchone()[0]
+        if pending:
+            raise ValueError("Cannot reassign shipment with pending or submitted tasks")
     with conn:
         conn.execute("""INSERT INTO ops_assignments(shipment_id,user_id,assigned_at) VALUES(?,?,?)
           ON CONFLICT(shipment_id) DO UPDATE SET user_id=excluded.user_id,active=1,assigned_at=excluded.assigned_at""",
@@ -151,8 +228,12 @@ def generate_tasks(conn, when=None, eligible_ids=None):
         query = """INSERT OR IGNORE INTO ops_tasks(shipment_id,cycle_at,user_id,price_iqd,created_at)
           SELECT a.shipment_id, ?, a.user_id, ?, ?
           FROM ops_assignments a JOIN ops_users u ON u.id=a.user_id
-          WHERE a.active=1 AND u.active=1"""
-        params = [slot, price, now_utc()]
+          WHERE a.active=1 AND u.active=1
+          AND NOT EXISTS (SELECT 1 FROM ops_followup f WHERE f.shipment_id=a.shipment_id
+            AND (f.state='completed' OR julianday(f.next_check_at)>julianday(?)))
+          AND NOT EXISTS (SELECT 1 FROM ops_tasks t WHERE t.shipment_id=a.shipment_id
+            AND t.status IN ('pending','submitted','rejected'))"""
+        params = [slot, price, now_utc(), (when or datetime.now(timezone.utc)).isoformat()]
         if ids is not None:
             query += " AND a.shipment_id IN (" + ",".join("?" for _ in ids) + ")"
             params.extend(ids)
@@ -160,7 +241,9 @@ def generate_tasks(conn, when=None, eligible_ids=None):
         return conn.total_changes - before
 
 
-def submit_task(conn, actor, task_id, evidence_source, review_note, route_changed):
+def submit_task(conn, actor, task_id, evidence_source, review_note, route_changed, completed=False):
+    if type(completed) is not bool:
+        raise ValueError("Invalid completion flag")
     if not evidence_source or not evidence_source.strip() or len(evidence_source) > 500:
         raise ValueError("Review evidence/source required")
     if not review_note or not review_note.strip() or len(review_note) > 2000:
@@ -170,10 +253,14 @@ def submit_task(conn, actor, task_id, evidence_source, review_note, route_change
     _require(conn, actor, ("operator",))
     with conn:
         cur = conn.execute("""UPDATE ops_tasks SET status='submitted',evidence_source=?,review_note=?,
-          route_changed=?,submitted_at=? WHERE id=? AND user_id=? AND status IN ('pending','rejected')""",
+          route_changed=?,submitted_at=? WHERE id=? AND user_id=? AND status IN ('pending','rejected')
+          AND EXISTS (SELECT 1 FROM ops_assignments a WHERE a.shipment_id=ops_tasks.shipment_id AND a.user_id=ops_tasks.user_id AND a.active=1)
+          AND NOT EXISTS (SELECT 1 FROM ops_followup f WHERE f.shipment_id=ops_tasks.shipment_id AND (f.state='completed' OR julianday(f.next_check_at)>julianday('now')))""",
           (evidence_source.strip(), review_note.strip(), int(route_changed), now_utc(), task_id, actor))
         if cur.rowcount != 1:
             raise ValueError("Task not assigned or already submitted")
+        conn.execute("INSERT INTO ops_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                     ("task_completion:"+str(task_id), str(int(completed))))
         audit(conn, actor, "task.submitted", "task", task_id)
 
 
@@ -182,7 +269,7 @@ def decide_task(conn, actor, task_id, approve, reason=""):
     if type(approve) is not bool or (not approve and not reason.strip()):
         raise ValueError("Rejection requires a reason")
     with conn:
-        row = conn.execute("SELECT user_id FROM ops_tasks WHERE id=? AND status='submitted'", (task_id,)).fetchone()
+        row = conn.execute("SELECT user_id,shipment_id FROM ops_tasks WHERE id=? AND status='submitted'", (task_id,)).fetchone()
         if row is None:
             raise ValueError("Task is not awaiting review")
         status = "approved" if approve else "rejected"
@@ -190,6 +277,15 @@ def decide_task(conn, actor, task_id, approve, reason=""):
                      (status, now_utc() if approve else None, actor if approve else None, task_id))
         conn.execute("INSERT INTO ops_notifications(user_id,title,body,created_at) VALUES(?,?,?,?)",
                      (row["user_id"], "نتيجة مراجعة المهمة", "تم اعتماد المهمة" if approve else "تم رفض المهمة: "+reason[:500], now_utc()))
+        if approve:
+            flag = conn.execute("SELECT value FROM ops_settings WHERE key=?", ("task_completion:"+str(task_id),)).fetchone()
+            completed = bool(flag and flag[0] == "1")
+            due = None if completed else (datetime.now(timezone.utc)+timedelta(hours=72)).isoformat(timespec="seconds")
+            conn.execute("""INSERT INTO ops_followup(shipment_id,state,next_check_at,task_id,updated_at)
+                VALUES(?,?,?,?,?) ON CONFLICT(shipment_id) DO UPDATE SET
+                state=excluded.state,next_check_at=excluded.next_check_at,task_id=excluded.task_id,updated_at=excluded.updated_at
+                WHERE ops_followup.state!='completed'""",
+                (row["shipment_id"], "completed" if completed else "waiting", due, task_id, now_utc()))
         audit(conn, actor, "task."+status, "task", task_id, reason[:500])
 
 
@@ -234,7 +330,7 @@ def dashboard_stats(conn, actor):
 
 def my_tasks(conn, actor, limit=100):
     _require(conn, actor, ("operator",))
-    return [dict(r) for r in conn.execute("SELECT * FROM ops_tasks WHERE user_id=? ORDER BY cycle_at DESC,id DESC LIMIT ?",
+    return [dict(r) for r in conn.execute("SELECT * FROM ops_tasks WHERE user_id=? AND status IN ('pending','rejected') AND NOT EXISTS (SELECT 1 FROM ops_followup f WHERE f.shipment_id=ops_tasks.shipment_id AND (f.state='completed' OR julianday(f.next_check_at)>julianday('now'))) ORDER BY cycle_at DESC,id DESC LIMIT ?",
                                          (actor, min(max(int(limit),1),500)))]
 
 

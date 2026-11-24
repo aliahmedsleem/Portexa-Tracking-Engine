@@ -29,7 +29,7 @@ def preview(conn, when=None):
     slot = cycle_start(when or datetime.now(timezone.utc))
     if not active:
         return {"cycle_at":slot,"eligible":0,"skipped":len(inactive),"new":0,"ids":[]}
-    existing = set()
+    existing = {int(r[0]) for r in conn.execute("""SELECT shipment_id FROM ops_followup WHERE state='completed' OR julianday(next_check_at)>julianday(?) UNION SELECT shipment_id FROM ops_tasks WHERE status IN ('pending','submitted','rejected')""", ((when or datetime.now(timezone.utc)).isoformat(),))}
     for start in range(0, len(active), 400):
         chunk = active[start:start+400]
         q = ",".join("?" for _ in chunk)
