@@ -93,9 +93,24 @@ input[type="hidden"],input[hidden],#nav-open{display:none!important}\n.mobile-to
 main{padding:14px}.panel{margin-bottom:12px}.grid{gap:10px}table{min-width:550px}
 }
 @media(prefers-reduced-motion:reduce){.sidebar,.mobile-backdrop{transition:none}}
+.mobile-nav,.install-action{display:none}
+@media(max-width:980px){
+.mobile-nav{display:flex;position:fixed;bottom:0;left:0;right:0;z-index:19;background:#102235;border-top:1px solid var(--line);padding:6px 8px calc(6px + env(safe-area-inset-bottom));justify-content:space-around;gap:4px}
+.mobile-nav a,.mobile-nav label{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:52px;margin:0;padding:4px;color:var(--muted);font-size:11px;text-align:center;border-radius:9px}
+.mobile-nav a.active{color:var(--gold);background:#243b50}.mobile-nav span{font-size:21px;line-height:1.2}
+.workspace main{padding-bottom:calc(90px + env(safe-area-inset-bottom))}
+.topbar{position:sticky;top:0;z-index:10;background:#102235}
+.install-action:not([hidden]){display:block;margin:12px auto;width:100%}
+}
+@media(max-width:600px){
+.dashboard-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+.dashboard-grid .panel{padding:12px}.dashboard-grid h3{font-size:12px;line-height:1.5}.dashboard-grid strong{font-size:19px}
+.panel{padding:14px;border-radius:12px}input,select,textarea{font-size:16px;min-height:48px}button{min-height:48px}
+.bundle-actions button,.bundle-save{width:100%;max-width:none}.container-item{padding:12px}
+}
 .container-item{border:1px solid #456078;border-radius:12px;margin:14px 0;padding:16px;min-width:0}.container-item legend{color:#f2d39b;font-weight:700}.bundle-actions{display:flex;flex-wrap:wrap;gap:10px;margin:16px 0}.bundle-actions button,.remove-container{background:#273e51;color:#f2d39b;border:1px solid #4a6276}.bundle-save{width:100%;max-width:420px}</style>
 """
-BASE = """<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>PORTEXA Operations</title><meta name="theme-color" content="#091522"><link rel="manifest" href="{{ url_for('pwa_manifest') }}"><script>if ("serviceWorker" in navigator) {window.addEventListener("load",()=>navigator.serviceWorker.register("{{ url_for('pwa_worker') }}").catch(()=>{}));}</script>""" + CSS + """</head><body>
+BASE = """<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>PORTEXA Operations</title><meta name="theme-color" content="#091522"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><link rel="apple-touch-icon" href="{{ url_for('pwa_png',size=192) }}"><link rel="manifest" href="{{ url_for('pwa_manifest') }}"><script>if ("serviceWorker" in navigator) {window.addEventListener("load",()=>navigator.serviceWorker.register("{{ url_for('pwa_worker') }}").catch(()=>{}));}</script>""" + CSS + """</head><body>
 {% if user %}
 <input type="checkbox" id="nav-open" hidden aria-label="فتح القائمة الجانبية">
 <div class="app-shell">
@@ -111,7 +126,7 @@ BASE = """<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><
     <a href="{{ url_for('source_statuses_page') }}" class="{{ 'active' if request.path == url_for('source_statuses_page') else '' }}"><span class="nav-symbol" aria-hidden="true">≋</span>حالات الشحنات</a>
     {% endif %}
   </nav></div>
-  <div class="sidebar-footer">
+  <div class="sidebar-footer"><button type="button" class="install-action" hidden>تثبيت التطبيق</button>
     <div class="profile-name">{{ user.full_name }}</div>
     <div class="profile-role">{{ {'admin':'مدير النظام','supervisor':'مشرف','operator':'موظف تتبع'}.get(user.role,user.role) }}</div>
     <form method="post" action="{{ url_for('logout') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit">تسجيل الخروج</button></form>
@@ -120,13 +135,25 @@ BASE = """<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><
 <div class="workspace">
   <div class="topbar"><div style="display:flex;align-items:center;gap:12px"><label for="nav-open" class="mobile-toggle" role="button" tabindex="0" aria-label="فتح القائمة">☰</label><div><h1>{{ 'إدارة مهام التتبع' if user.role == 'operator' else 'مركز إدارة العمليات' }}</h1><p>PORTEXA / Operations</p></div></div></div>
   <main>{% for msg in get_flashed_messages() %}<p class="panel flash" role="status">{{ msg }}</p>{% endfor %}{{ body|safe }}</main>
-</div></div>
+</div>
+<nav class="mobile-nav" aria-label="التنقل على الهاتف">
+<a href="{{ url_for('home') }}" class="{{ 'active' if request.path == url_for('home') else '' }}"><span aria-hidden="true">▦</span>{{ 'مهامي' if user.role == 'operator' else 'الرئيسية' }}</a>
+{% if user.role in ('admin','supervisor') %}<a href="{{ url_for('assignment_management') }}"><span aria-hidden="true">▤</span>الإسنادات</a><a href="{{ url_for('distribution_preview_page') }}"><span aria-hidden="true">⇄</span>التوزيع</a>{% endif %}
+<a href="{{ url_for('notifications') }}" class="{{ 'active' if request.path == url_for('notifications') else '' }}"><span aria-hidden="true">◉</span>الإشعارات</a>
+<label for="nav-open"><span aria-hidden="true">☰</span>المزيد</label>
+</nav></div>
 {% else %}
 <div class="auth-shell"><div class="auth-container">
 <div class="brand auth-brand"><span class="brand-mark">P</span><div><strong>PORTEXA</strong><small>OPERATIONS CENTER</small></div></div>
-<main>{% for msg in get_flashed_messages() %}<p class="panel flash" role="status">{{ msg }}</p>{% endfor %}{{ body|safe }}</main>
+<main>{% for msg in get_flashed_messages() %}<p class="panel flash" role="status">{{ msg }}</p>{% endfor %}{{ body|safe }}<button type="button" class="install-action" hidden>تثبيت التطبيق</button></main>
 </div></div>
 {% endif %}
+<script>
+let installPrompt;
+window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;document.querySelectorAll('.install-action').forEach(b=>b.hidden=false)});
+window.addEventListener('appinstalled',()=>{installPrompt=null;document.querySelectorAll('.install-action').forEach(b=>b.hidden=true)});
+document.addEventListener('click',async e=>{if(!e.target.closest('.install-action')||!installPrompt)return;await installPrompt.prompt();installPrompt=null;document.querySelectorAll('.install-action').forEach(b=>b.hidden=true)});
+</script>
 <script>document.addEventListener('click',function(e){const add=e.target.closest('.add-container'),remove=e.target.closest('.remove-container'),copy=e.target.closest('.copy-movement');if(!add&&!remove&&!copy)return;const form=e.target.closest('.shipment-bundle');if(!form)return;const list=form.querySelector('.container-list');if(add){list.append(form.querySelector('.container-template').content.cloneNode(true));return;}if(remove){remove.closest('.container-item').remove();return;}if(copy){const items=[...list.querySelectorAll('.container-item')];if(items.length<2)return;if(!window.confirm('هل تأكدت أن جميع الحاويات في هذه البوليصة تتحرك معاً؟ سيتم استبدال حقول الحركة للحاويات الأخرى بحركة الحاوية الأولى، دون تغيير أرقامها.'))return;for(const item of items.slice(1)){for(const source of items[0].querySelectorAll('[name^="move_"]')){const dest=item.querySelector('[name="'+source.name+'"]');if(dest)dest.value=source.value;}}}});</script></body></html>"""
 
 def db():
@@ -855,7 +882,28 @@ def pwa_manifest():
     return jsonify(name="PORTEXA Operations", short_name="PORTEXA", lang="ar", dir="rtl",
                    start_url=url_for("home"), scope="/", display="standalone",
                    background_color="#091522", theme_color="#091522",
-                   icons=[{"src":url_for("pwa_icon"),"sizes":"any","type":"image/svg+xml","purpose":"any"}])
+                   icons=[{"src":url_for("pwa_png",size=n),"sizes":f"{n}x{n}","type":"image/png","purpose":"any"} for n in (192,512)])
+
+
+@app.get("/pwa-icon-<int:size>.png")
+def pwa_png(size):
+    import struct
+    import zlib
+    if size not in (192, 512):
+        abort(404)
+    # Rasterize a simple geometric P using only the standard library.
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind+data)&0xffffffff)
+    rows = []
+    for y in range(size):
+        row = bytearray([0])
+        for x in range(size):
+            a,b = x/size,y/size
+            gold = (.30<=a<=.40 and .23<=b<=.77) or (.40<a<=.68 and (.23<=b<=.33 or .46<=b<=.56)) or (.58<=a<=.68 and .33<b<.46)
+            row.extend((232,191,120) if gold else (9,21,34))
+        rows.append(bytes(row))
+    data = b"\\x89PNG\\r\\n\\x1a\\n" + chunk(b"IHDR",struct.pack(">IIBBBBB",size,size,8,2,0,0,0)) + chunk(b"IDAT",zlib.compress(b"".join(rows))) + chunk(b"IEND",b"")
+    return Response(data,mimetype="image/png",headers={"Cache-Control":"public, max-age=86400"})
 
 
 @app.get("/pwa-icon.svg")
