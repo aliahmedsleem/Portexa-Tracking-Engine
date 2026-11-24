@@ -881,10 +881,13 @@ def pay(user_id):
 
 @app.get("/manifest.webmanifest")
 def pwa_manifest():
-    return jsonify(name="PORTEXA Operations", short_name="PORTEXA", lang="ar", dir="rtl",
-                   start_url=url_for("home"), scope="/", display="standalone",
+    response = jsonify(name="PORTEXA Operations", short_name="PORTEXA", lang="ar", dir="rtl",
+                   id="/", start_url=url_for("home"), scope="/", display="standalone",
                    background_color="#091522", theme_color="#091522",
                    icons=[{"src":url_for("pwa_png",size=n),"sizes":f"{n}x{n}","type":"image/png","purpose":"any"} for n in (192,512)])
+    response.mimetype = "application/manifest+json"
+    response.headers["Cache-Control"] = "no-cache"
+    return response
 
 
 @app.get("/pwa-icon-<int:size>.png")
@@ -904,8 +907,8 @@ def pwa_png(size):
             gold = (.30<=a<=.40 and .23<=b<=.77) or (.40<a<=.68 and (.23<=b<=.33 or .46<=b<=.56)) or (.58<=a<=.68 and .33<b<.46)
             row.extend((232,191,120) if gold else (9,21,34))
         rows.append(bytes(row))
-    data = b"\\x89PNG\\r\\n\\x1a\\n" + chunk(b"IHDR",struct.pack(">IIBBBBB",size,size,8,2,0,0,0)) + chunk(b"IDAT",zlib.compress(b"".join(rows))) + chunk(b"IEND",b"")
-    return Response(data,mimetype="image/png",headers={"Cache-Control":"public, max-age=86400"})
+    data = bytes.fromhex("89504e470d0a1a0a") + chunk(b"IHDR",struct.pack(">IIBBBBB",size,size,8,2,0,0,0)) + chunk(b"IDAT",zlib.compress(b"".join(rows))) + chunk(b"IEND",b"")
+    return Response(data,mimetype="image/png",headers={"Cache-Control":"no-cache"})
 
 
 @app.get("/pwa-icon.svg")
