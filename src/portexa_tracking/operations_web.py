@@ -110,7 +110,7 @@ main{padding:14px}.panel{margin-bottom:12px}.grid{gap:10px}table{min-width:550px
 }
 .container-item{border:1px solid #456078;border-radius:12px;margin:14px 0;padding:16px;min-width:0}.container-item legend{color:#f2d39b;font-weight:700}.bundle-actions{display:flex;flex-wrap:wrap;gap:10px;margin:16px 0}.bundle-actions button,.remove-container{background:#273e51;color:#f2d39b;border:1px solid #4a6276}.bundle-save{width:100%;max-width:420px}</style>
 """
-BASE = """<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>PORTEXA Operations</title><meta name="theme-color" content="#091522"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><link rel="apple-touch-icon" href="{{ url_for('pwa_png',size=192) }}"><link rel="manifest" href="{{ url_for('pwa_manifest') }}"><script>if ("serviceWorker" in navigator) {window.addEventListener("load",()=>navigator.serviceWorker.register("{{ url_for('pwa_worker') }}").catch(()=>{}));}</script>""" + CSS + """</head><body>
+BASE = """<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>PORTEXA Operations</title><meta name="theme-color" content="#091522"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><link rel="apple-touch-icon" href="{{ url_for('pwa_png',size=192,v=2) }}"><link rel="manifest" href="{{ url_for('pwa_manifest') }}"><script>if ("serviceWorker" in navigator) {window.addEventListener("load",()=>navigator.serviceWorker.register("{{ url_for('pwa_worker') }}",{scope:"/",updateViaCache:"none"}).catch(error=>console.error("PORTEXA service worker:",error)));}</script>""" + CSS + """</head><body>
 {% if user %}
 <input type="checkbox" id="nav-open" hidden aria-label="فتح القائمة الجانبية">
 <div class="app-shell">
@@ -879,12 +879,21 @@ def pay(user_id):
     return action(lambda c,a: ops.record_payment(c,a,user_id,(ops.payroll(c,a,user_id)["balance_iqd"] if request.form.get("settle")=="1" else int(request.form["amount"])),request.form.get("note","")))
 
 
+@app.get("/app-start")
+def pwa_start():
+    # Stable public launch document: no authentication redirect during install.
+    return page("""<section class="panel"><h2>PORTEXA Operations</h2>
+<p>مركز إدارة العمليات ومتابعة البوالص</p>
+<a href="{{ url_for('home') }}">فتح مساحة العمل</a>
+</section>""")
+
+
 @app.get("/manifest.webmanifest")
 def pwa_manifest():
     response = jsonify(name="PORTEXA Operations", short_name="PORTEXA", lang="ar", dir="rtl",
-                   id="/", start_url=url_for("home"), scope="/", display="standalone",
+                   id="/", start_url=url_for("pwa_start"), scope="/", display="standalone",
                    background_color="#091522", theme_color="#091522",
-                   icons=[{"src":url_for("pwa_png",size=n),"sizes":f"{n}x{n}","type":"image/png","purpose":"any"} for n in (192,512)])
+                   icons=[{"src":url_for("pwa_png",size=n,v=2),"sizes":f"{n}x{n}","type":"image/png","purpose":"any"} for n in (192,512)])
     response.mimetype = "application/manifest+json"
     response.headers["Cache-Control"] = "no-cache"
     return response
@@ -919,8 +928,8 @@ def pwa_icon():
 @app.get("/service-worker.js")
 def pwa_worker():
     # Network-only: never cache authenticated pages or shipment data.
-    return Response("self.addEventListener('install',()=>self.skipWaiting());self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));self.addEventListener('fetch',()=>{});",
-                    mimetype="application/javascript", headers={"Cache-Control":"no-store"})
+    return Response("self.addEventListener('install',()=>self.skipWaiting());self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));self.addEventListener('fetch',e=>{if(e.request.method==='GET'&&new URL(e.request.url).origin===self.location.origin)e.respondWith(fetch(e.request));});",
+                    mimetype="application/javascript", headers={"Cache-Control":"no-store","Service-Worker-Allowed":"/"})
 
 
 def main():
